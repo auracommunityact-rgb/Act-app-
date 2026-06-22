@@ -28,6 +28,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -82,11 +83,24 @@ fun MainAppContainer() {
     val notifications by AuraRepository.notificationsState.collectAsStateWithLifecycle()
     val usersList by AuraRepository.usersListState.collectAsStateWithLifecycle()
 
+    // NEW Social states
+    val videos by AuraRepository.videosState.collectAsStateWithLifecycle()
+    val liveStreams by AuraRepository.liveStreamsState.collectAsStateWithLifecycle()
+
     // Screen navigation layout states
     var currentTab by remember { mutableStateOf(AppTab.HOME) }
     var showNotificationsDrawer by remember { mutableStateOf(false) }
     var activeProductDetailId by remember { mutableStateOf<String?>(null) }
     var activeCreatorDetailId by remember { mutableStateOf<String?>(null) }
+    
+    var activeVideoId by remember { mutableStateOf<String?>(null) }
+    var activeLiveStreamId by remember { mutableStateOf<String?>(null) }
+    var showCreationMenu by remember { mutableStateOf(false) }
+    var showCreatePostDialog by remember { mutableStateOf(false) }
+    var showUploadVideoDialog by remember { mutableStateOf(false) }
+    var showStartLiveDialog by remember { mutableStateOf(false) }
+    var pipVideoId by remember { mutableStateOf<String?>(null) }
+    var pipLiveStreamId by remember { mutableStateOf<String?>(null) }
 
     // Onboarding form draft state
     var onboardingStep by remember { mutableStateOf(1) }
@@ -679,8 +693,8 @@ fun MainAppContainer() {
                 NavigationBarItem(
                     selected = currentTab == AppTab.HOME,
                     onClick = { currentTab = AppTab.HOME },
-                    icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
-                    label = { Text("Home", fontSize = 11.sp) },
+                    icon = { Icon(Icons.Default.Groups, contentDescription = "Community") },
+                    label = { Text("Community", fontSize = 11.sp) },
                     colors = NavigationBarItemDefaults.colors(selectedIconColor = Color(0xFF00E5FF), indicatorColor = Color(0xFF1D2230))
                 )
                 NavigationBarItem(
@@ -737,11 +751,20 @@ fun MainAppContainer() {
                 label = "app_tabs_anim"
             ) { tab ->
                 when (tab) {
-                    AppTab.HOME -> HomeTabScreen(
-                        banners, creators, products, news, posts, currentUser,
+                    AppTab.HOME -> CommunityTabScreen(
+                        banners = banners,
+                        creators = creators,
+                        products = products,
+                        newsList = news,
+                        posts = posts,
+                        videos = videos,
+                        liveStreams = liveStreams,
+                        currentUser = currentUser,
                         onClickCreator = { activeCreatorDetailId = it },
                         onClickProduct = { activeProductDetailId = it },
-                        onClickViewAllStore = { currentTab = AppTab.STORE }
+                        onClickViewAllStore = { currentTab = AppTab.STORE },
+                        onClickVideo = { activeVideoId = it },
+                        onClickLive = { activeLiveStreamId = it }
                     )
                     AppTab.STORE -> StoreTabScreen(
                         products,
@@ -753,7 +776,7 @@ fun MainAppContainer() {
                         usersList, products, games, news, posts, banners, creators, notifications,
                         onSwitchToAdmin = { AuraRepository.switchUserRole(UserRole.ADMIN) }
                     )
-                    AppTab.PROFILE -> ProfileTabScreen(currentUser, posts)
+                    AppTab.PROFILE -> ProfileTabScreen(currentUser, posts, onTriggerCreationMenu = { showCreationMenu = true })
                 }
             }
 
@@ -893,7 +916,8 @@ fun MainAppContainer() {
                                     )
                                     Button(
                                         onClick = {
-                                            Toast.makeText(context, "Direct Checkout Secured! $${prd.price} pre-approved.", Toast.LENGTH_LONG).show()
+                                            AuraRepository.purchaseProductToInventory(prd)
+                                            Toast.makeText(context, "Direct Checkout Secured! $${prd.price} pre-approved and purchased to inventory.", Toast.LENGTH_LONG).show()
                                             activeProductDetailId = null
                                         },
                                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF85))
@@ -1629,12 +1653,22 @@ fun GamesTabScreen(
             } else {
                 items(customGamesOnly) { gm ->
                     Card(
-                        modifier = Modifier.width(130.dp),
+                        modifier = Modifier.width(140.dp),
                         colors = CardDefaults.cardColors(containerColor = Color(0xFF172030))
                     ) {
                         Column {
                             AsyncImage(model = gm.thumbnail, contentDescription = "thumb", modifier = Modifier.height(70.dp).fillMaxWidth(), contentScale = ContentScale.Crop)
-                            Text(gm.name, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(6.dp))
+                            Text(gm.name, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp))
+                            Button(
+                                onClick = {
+                                    AuraRepository.addGameToInventory(gm)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF85)),
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp).height(24.dp),
+                                contentPadding = PaddingValues(0.dp)
+                            ) {
+                                Text("Claim Game", color = Color.Black, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
@@ -2034,19 +2068,21 @@ fun AdminDashboardTabScreen(
 @Composable
 fun ProfileTabScreen(
     currentUser: UserProfile,
-    myPosts: List<Post>
+    myPosts: List<Post>,
+    onTriggerCreationMenu: () -> Unit
 ) {
     var chatMessageInput by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     val chatMessages by AuraRepository.chatMessagesState.collectAsStateWithLifecycle()
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .testTag("profile_view"),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("profile_view"),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
         // Cover & avatar profiles card
         item {
             Card(
@@ -2192,6 +2228,74 @@ fun ProfileTabScreen(
             }
         }
 
+        // User Inventories Cabinet from Firestore Sync
+        item {
+            val userInventories by AuraRepository.userInventoryState.collectAsStateWithLifecycle()
+            Text("🎒 MY CLOUD CABINET & INVENTORIES (FIRESTORE SYNCED)", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F131E)),
+                border = BorderStroke(1.dp, Color(0xFF00FF85).copy(alpha = 0.3f))
+            ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (userInventories.isEmpty()) {
+                        Text(
+                            text = "Your digital cabinet is empty. Head to the Shop to buy products, or play Mini Games to claim virtual keys!",
+                            color = Color.LightGray,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    } else {
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxWidth().height(140.dp)
+                        ) {
+                            items(userInventories) { item ->
+                                Card(
+                                    modifier = Modifier.width(110.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF171B26)),
+                                    border = BorderStroke(1.dp, Color(0xFF2B3245))
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(6.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(60.dp)
+                                                .clip(RoundedCornerShape(6.dp))
+                                        ) {
+                                            AsyncImage(
+                                                model = item.itemImage,
+                                                contentDescription = "item image",
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = item.itemName,
+                                            color = Color.White,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 2,
+                                            textAlign = TextAlign.Center
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = if (item.itemType == "Product") "Product" else "Game Claimed",
+                                            color = if (item.itemType == "Product") Color(0xFF00E5FF) else Color(0xFF00FF85),
+                                            fontSize = 8.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Sandbox System settings with switchers
         item {
             Text("⚙️ ACCESSIBLE EVALUATION SETTINGS", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
@@ -2236,6 +2340,1639 @@ fun ProfileTabScreen(
                         modifier = Modifier.fillMaxWidth().testTag("sandbox_factory_reset_btn")
                     ) {
                         Text("Factory Reset Profile Sandbox Data", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+
+        // Floating "+" button - visible only for Admin and Community Members
+        if (currentUser.role == UserRole.ADMIN || currentUser.role == UserRole.COMMUNITY_MEMBER) {
+            FloatingActionButton(
+                onClick = { onTriggerCreationMenu() },
+                containerColor = Color(0xFFBD00FF),
+                contentColor = Color.White,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp)
+                    .testTag("profile_create_fab"),
+                shape = CircleShape
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Create Content Option", modifier = Modifier.size(24.dp))
+            }
+        }
+    }
+}
+
+// =========================================================================
+//  COMMUNITY TAB SCREEN - INSTAGRAM + YOUTUBE + FACEBOOK COLLAGE HYBRID
+// =========================================================================
+
+@Composable
+fun CommunityTabScreen(
+    banners: List<HeroBanner>,
+    creators: List<Creator>,
+    products: List<Product>,
+    newsList: List<NewsItem>,
+    posts: List<Post>,
+    videos: List<VideoItem>,
+    liveStreams: List<LiveStreamItem>,
+    currentUser: UserProfile,
+    onClickCreator: (String) -> Unit,
+    onClickProduct: (String) -> Unit,
+    onClickViewAllStore: () -> Unit,
+    onClickVideo: (String) -> Unit,
+    onClickLive: (String) -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedSubTab by remember { mutableStateOf("All") } // All, Posts, Videos, Live, Trending, Following
+    var activeCategoryTag by remember { mutableStateOf<String?>(null) } // Gaming, Hardware, Esports
+    
+    // Comment inputs map to simulate typing on inline post containers
+    var inlineCommentInputs = remember { mutableStateMapOf<String, String>() }
+
+    val context = LocalContext.current
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF080B10))
+    ) {
+        // 1. NEON GAMER SEARCH BAR HEADER
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Search Posts, Videos, Live streams, Tags...", fontSize = 12.sp, color = Color.Gray) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "search icon", tint = Color.LightGray) },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Default.Close, contentDescription = "clear search", tint = Color.LightGray)
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("community_search_bar_field"),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Color(0xFF00E5FF),
+                    unfocusedBorderColor = Color(0xFF2B3245),
+                    focusedContainerColor = Color(0xFF121620),
+                    unfocusedContainerColor = Color(0xFF0A0F1D)
+                ),
+                singleLine = true
+            )
+            
+            // Neon category shorthand filter
+            Box(
+                modifier = Modifier
+                    .background(
+                        if (activeCategoryTag != null) Color(0xFFFF007A) else Color(0xFF121620),
+                        RoundedCornerShape(8.dp)
+                    )
+                    .border(1.dp, Color(0xFFBD00FF).copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                    .clickable {
+                        activeCategoryTag = if (activeCategoryTag == null) "Gaming" else null
+                        Toast
+                            .makeText(
+                                context,
+                                if (activeCategoryTag != null) "Filtered by #Gaming" else "Removed tag filter",
+                                Toast.LENGTH_SHORT
+                            )
+                            .show()
+                    }
+                    .padding(horizontal = 12.dp, vertical = 12.dp)
+            ) {
+                Text("#Gaming", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        // 2. SOCIAL MEDIA MATRIX NAVIGATION TABS (All, Posts, Videos, Live, Trending, Following)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            val subTabs = listOf("All", "Posts", "Videos", "Live", "Trending", "Following")
+            subTabs.forEach { tab ->
+                val isSelected = selectedSubTab == tab
+                val glowColor = when (tab) {
+                    "Live" -> Color(0xFFFF007A)
+                    "Videos" -> Color(0xFF00E5FF)
+                    "Trending" -> Color(0xFF00FF85)
+                    else -> Color(0xFFBD00FF)
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(if (isSelected) glowColor else Color(0xFF121620))
+                        .border(
+                            1.dp,
+                            if (isSelected) Color.White else Color(0xFF2B3245),
+                            RoundedCornerShape(20.dp)
+                        )
+                        .clickable { selectedSubTab = tab }
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .testTag("subtab_$tab")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (tab == "Live") {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White)
+                            )
+                        }
+                        Text(
+                            text = tab.uppercase(),
+                            color = if (isSelected) Color.Black else Color.LightGray,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // 3. RENDER CORE CHANNELS FEED
+        val filteredPosts = posts.filter {
+            (searchQuery.isEmpty() || it.content.contains(searchQuery, ignoreCase = true)) &&
+            (activeCategoryTag == null || it.content.contains(activeCategoryTag!!, ignoreCase = true))
+        }
+
+        val filteredVideos = videos.filter {
+            (searchQuery.isEmpty() || it.title.contains(searchQuery, ignoreCase = true) || it.description.contains(searchQuery, ignoreCase = true)) &&
+            (activeCategoryTag == null || it.title.contains(activeCategoryTag!!, ignoreCase = true) || it.description.contains(activeCategoryTag!!, ignoreCase = true))
+        }
+
+        val filteredLive = liveStreams.filter {
+            (searchQuery.isEmpty() || it.title.contains(searchQuery, ignoreCase = true) || it.description.contains(searchQuery, ignoreCase = true)) &&
+            (activeCategoryTag == null || it.category.contains(activeCategoryTag!!, ignoreCase = true))
+        }
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .weight(1f),
+            contentPadding = PaddingValues(bottom = 80.dp, start = 14.dp, end = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            
+            // --- TAB ALL ---
+            if (selectedSubTab == "All") {
+                // Horizontal live broadcasts bar
+                if (filteredLive.isNotEmpty()) {
+                    item {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("🔴 PRO BROADCASTING", color = Color(0xFFFF007A), fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFFF007A))
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            items(filteredLive) { stream ->
+                                Card(
+                                    modifier = Modifier
+                                        .width(180.dp)
+                                        .clickable { onClickLive(stream.id) },
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF121620)),
+                                    border = BorderStroke(1.dp, Color(0xFFFF007A).copy(alpha = 0.5f))
+                                ) {
+                                    Box {
+                                        AsyncImage(
+                                            model = stream.thumbnail,
+                                            contentDescription = "stream thumb",
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(90.dp),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.TopStart)
+                                                .padding(6.dp)
+                                                .background(Color(0xFFFF007A), RoundedCornerShape(4.dp))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("LIVE", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .padding(6.dp)
+                                                .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("👁️ ${stream.viewerCount}", color = Color.White, fontSize = 8.sp)
+                                        }
+                                    }
+                                    Column(modifier = Modifier.padding(8.dp)) {
+                                        Text(stream.title, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text("by ${stream.creatorName}", color = Color.LightGray, fontSize = 9.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Pro Gaming Creators Scroll
+                item {
+                    Text("🔥 GAMING CHIEFTAINS / CREATORS", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(creators) { cr ->
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier
+                                    .width(80.dp)
+                                    .clickable { onClickCreator(cr.id) }
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(54.dp)
+                                        .clip(CircleShape)
+                                        .border(2.dp, if (cr.isFollowed) Color(0xFF00E5FF) else Color(0xFFBD00FF), CircleShape)
+                                ) {
+                                    AsyncImage(model = cr.profilePic, contentDescription = "cr", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(cr.name, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(if (cr.isFollowed) "Following" else "+ Follow", color = if (cr.isFollowed) Color(0xFF00FF85) else Color.LightGray, fontSize = 8.sp)
+                            }
+                        }
+                    }
+                }
+
+                // Mixed layout units
+                item {
+                    Text("📢 UNIFIED GAME CHANNELS FEED", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                }
+
+                items(filteredPosts) { post ->
+                    CommunityPostItemCard(
+                        post = post,
+                        inlineCommentInputs = inlineCommentInputs,
+                        currentUser = currentUser,
+                        onClickCreator = onClickCreator
+                    )
+                }
+            }
+
+            // --- TAB POSTS ---
+            if (selectedSubTab == "Posts") {
+                if (filteredPosts.isEmpty()) {
+                    item {
+                        Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                            Text("No posts available matching filters.", color = Color.Gray, fontSize = 12.sp)
+                        }
+                    }
+                }
+                items(filteredPosts) { post ->
+                    CommunityPostItemCard(
+                        post = post,
+                        inlineCommentInputs = inlineCommentInputs,
+                        currentUser = currentUser,
+                        onClickCreator = onClickCreator
+                    )
+                }
+            }
+
+            // --- TAB VIDEOS ---
+            if (selectedSubTab == "Videos") {
+                if (filteredVideos.isEmpty()) {
+                    item {
+                        Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                            Text("No gameplay replays or video highlights yet.", color = Color.Gray, fontSize = 12.sp)
+                        }
+                    }
+                } else {
+                    // YouTube-Style Dual Column Grid
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            filteredVideos.chunked(2).forEach { rowItems ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    rowItems.forEach { video ->
+                                        Card(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clickable { onClickVideo(video.id) },
+                                            colors = CardDefaults.cardColors(containerColor = Color(0xFF121620)),
+                                            border = BorderStroke(1.dp, Color(0xFF2B3245))
+                                        ) {
+                                            Column {
+                                                Box {
+                                                    AsyncImage(
+                                                        model = video.thumbnail,
+                                                        contentDescription = "thumbnail",
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .height(100.dp),
+                                                        contentScale = ContentScale.Crop
+                                                    )
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .align(Alignment.BottomEnd)
+                                                            .padding(4.dp)
+                                                            .background(Color.Black.copy(alpha = 0.8f), RoundedCornerShape(4.dp))
+                                                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text(video.duration, color = Color.White, fontSize = 9.sp)
+                                                    }
+                                                    if (video.isYoutubeImport) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .align(Alignment.TopStart)
+                                                                .padding(4.dp)
+                                                                .background(Color.Red, RoundedCornerShape(4.dp))
+                                                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                                                        ) {
+                                                            Text("YOUTUBE", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                                        }
+                                                    }
+                                                }
+                                                Column(modifier = Modifier.padding(8.dp)) {
+                                                    Text(video.title, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                    Text("by ${video.creatorName}", color = Color.LightGray, fontSize = 9.sp)
+                                                    Spacer(modifier = Modifier.height(4.dp))
+                                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                        Text("🤍 ${video.likes}", color = Color.Gray, fontSize = 9.sp)
+                                                        Text("💬 ${video.comments.size}", color = Color.Gray, fontSize = 9.sp)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if (rowItems.size < 2) {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // --- TAB LIVE ---
+            if (selectedSubTab == "Live") {
+                if (filteredLive.isEmpty()) {
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF171B26)),
+                            modifier = Modifier.fillMaxWidth().padding(16.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("No Active Broadcasters", color = Color.Gray, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("Go to your profile settings and click '+' to start broadcasting a simulated live loop now!", color = Color.LightGray, fontSize = 12.sp, textAlign = TextAlign.Center)
+                            }
+                        }
+                    }
+                } else {
+                    items(filteredLive) { stream ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onClickLive(stream.id) },
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF121620)),
+                            border = BorderStroke(1.dp, Color(0xFFFF007A))
+                        ) {
+                            Box {
+                                AsyncImage(
+                                    model = stream.thumbnail,
+                                    contentDescription = "poster",
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(180.dp),
+                                    contentScale = ContentScale.Crop
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(12.dp)
+                                        .background(Color(0xFFFF007A), RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text("LIVE NOW", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomStart)
+                                        .padding(12.dp)
+                                        .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text("Viewer Spectators: ${stream.viewerCount}", color = Color.White, fontSize = 10.sp)
+                                }
+                            }
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Text(stream.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                Text("Category: ${stream.category}", color = Color(0xFF00E5FF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(stream.description, color = Color.LightGray, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // --- TAB TRENDING ---
+            if (selectedSubTab == "Trending") {
+                // Sort by likes descending
+                val popularPosts = posts.sortedByDescending { it.likes }.take(3)
+                val popularVideos = videos.sortedByDescending { it.likes }.take(3)
+
+                item {
+                    Text("🔥 MOST LIKED VIDEOS", color = Color(0xFF00FF85), fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                }
+
+                items(popularVideos) { video ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onClickVideo(video.id) },
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF121620))
+                    ) {
+                        Row(modifier = Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Box {
+                                AsyncImage(
+                                    model = video.thumbnail,
+                                    contentDescription = "th",
+                                    modifier = Modifier
+                                        .size(90.dp)
+                                        .clip(RoundedCornerShape(6.dp)),
+                                    contentScale = ContentScale.Crop
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(4.dp)
+                                        .background(Color.Black, RoundedCornerShape(3.dp))
+                                        .padding(horizontal = 4.dp, vertical = 1.dp)
+                                ) {
+                                    Text("🔥 #${video.likes} likes", color = Color(0xFF00FF85), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(video.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                Text("by ${video.creatorName}", color = Color.LightGray, fontSize = 11.sp)
+                                Text(video.description, color = Color.Gray, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    Text("🔥 HIGHEST ENGAGEMENT DISCUSSIONS", color = Color(0xFF00FF85), fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                }
+
+                items(popularPosts) { post ->
+                    CommunityPostItemCard(
+                        post = post,
+                        inlineCommentInputs = inlineCommentInputs,
+                        currentUser = currentUser,
+                        onClickCreator = onClickCreator
+                    )
+                }
+            }
+
+            // --- TAB FOLLOWING ---
+            if (selectedSubTab == "Following") {
+                val followedCreatorNames = creators.filter { it.isFollowed }.map { it.name }
+                val followedPosts = posts.filter { followedCreatorNames.contains(it.authorName) }
+                
+                if (followedPosts.isEmpty()) {
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF171B26)),
+                            modifier = Modifier.fillMaxWidth().padding(16.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("Your Timeline is Quiet", color = Color.Gray, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("You are not currently following any creators who have active publications. Tap followed creators in our chieftains banner above to populate details!", color = Color.LightGray, fontSize = 12.sp, textAlign = TextAlign.Center)
+                            }
+                        }
+                    }
+                } else {
+                    items(followedPosts) { post ->
+                        CommunityPostItemCard(
+                            post = post,
+                            inlineCommentInputs = inlineCommentInputs,
+                            currentUser = currentUser,
+                            onClickCreator = onClickCreator
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CommunityPostItemCard(
+    post: Post,
+    inlineCommentInputs: MutableMap<String, String>,
+    currentUser: UserProfile,
+    onClickCreator: (String) -> Unit
+) {
+    val context = LocalContext.current
+    var isCommentsExpanded by remember { mutableStateOf(false) }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF121620)),
+        border = BorderStroke(1.dp, Color(0xFF2B3245))
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .clickable {
+                                // Find creator and click
+                                AuraRepository.creatorsState.value
+                                    .find { it.name == post.authorName }
+                                    ?.let { onClickCreator(it.id) }
+                            }
+                    ) {
+                        AsyncImage(model = post.authorAvatar, contentDescription = "av", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    }
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = post.authorName,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                modifier = Modifier.clickable {
+                                    AuraRepository.creatorsState.value
+                                        .find { it.name == post.authorName }
+                                        ?.let { onClickCreator(it.id) }
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            if (post.authorRole == UserRole.ADMIN) {
+                                Text("ADMIN", color = Color(0xFFFF007A), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Text("@author", color = Color.Gray, fontSize = 10.sp)
+                    }
+                }
+
+                // Delete or pin action context menu for moderate role
+                if (currentUser.role == UserRole.ADMIN) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        IconButton(onClick = {
+                            AuraRepository.pinPostToggle(post.id)
+                            Toast.makeText(context, if (post.isPinned) "Post unpinned!" else "Post pinned to top!", Toast.LENGTH_SHORT).show()
+                        }) {
+                            Icon(
+                                Icons.Default.PushPin,
+                                contentDescription = "Pin Content",
+                                tint = if (post.isPinned) Color(0xFF00E5FF) else Color.LightGray,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        IconButton(onClick = {
+                            AuraRepository.deletePost(post.id)
+                            Toast.makeText(context, "Post deleted by Admin moderate", Toast.LENGTH_SHORT).show()
+                        }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete Content", tint = Color.Red, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(post.content, color = Color.White, fontSize = 13.sp)
+
+            post.image?.let { img ->
+                Spacer(modifier = Modifier.height(10.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(170.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                ) {
+                    AsyncImage(model = img, contentDescription = "post graphic", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Action bars (Likes, comments indicators)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Row(
+                        modifier = Modifier.clickable { AuraRepository.toggleLikePost(post.id) },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (post.isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            contentDescription = "like",
+                            tint = if (post.isLiked) Color.Red else Color.LightGray,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text("${post.likes}", color = Color.LightGray, fontSize = 11.sp)
+                    }
+                    Row(
+                        modifier = Modifier.clickable { isCommentsExpanded = !isCommentsExpanded },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(Icons.Default.Comment, contentDescription = "comment", tint = Color.LightGray, modifier = Modifier.size(18.dp))
+                        Text("${post.comments.size}", color = Color.LightGray, fontSize = 11.sp)
+                    }
+                }
+                
+                if (post.isPinned) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Icon(Icons.Default.PushPin, contentDescription = "pinned icon", tint = Color(0xFF00FF85), modifier = Modifier.size(14.dp))
+                        Text("PINNED", color = Color(0xFF00FF85), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            // Inline comment system expandable drawer
+            if (isCommentsExpanded) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Divider(color = Color(0xFF2B3245), thickness = 0.5.dp)
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    post.comments.forEach { comment ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(comment.authorName, color = Color(0xFF00E5FF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(comment.commentText, color = Color.White, fontSize = 11.sp)
+                        }
+                    }
+
+                    if (post.comments.isEmpty()) {
+                        Text("No comments yet. Be first to comment details!", color = Color.Gray, fontSize = 10.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    
+                    // Comment input textfield
+                    val commentText = inlineCommentInputs[post.id] ?: ""
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = commentText,
+                            onValueChange = { inlineCommentInputs[post.id] = it },
+                            placeholder = { Text("Write comment...", fontSize = 10.sp) },
+                            modifier = Modifier.weight(1f).height(44.dp),
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF00E5FF)),
+                            singleLine = true
+                        )
+                        Button(
+                            onClick = {
+                                if (commentText.isNotBlank()) {
+                                    AuraRepository.addCommentToPost(post.id, commentText)
+                                    inlineCommentInputs[post.id] = ""
+                                    Toast.makeText(context, "Comment submitted!", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBD00FF)),
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                            modifier = Modifier.height(34.dp)
+                        ) {
+                            Text("Send", color = Color.White, fontSize = 10.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CreationOption(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    color: Color,
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clickable { onClick() }
+            .padding(12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .background(color.copy(alpha = 0.15f), CircleShape)
+                .border(1.dp, color, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = label, tint = color, modifier = Modifier.size(24.dp))
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(label, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+// =========================================================================
+//  CREATOR PROFILE SCREEN - GIGANTIC TABS DETAIL SCREEN WITH CONTENT CODES
+// =========================================================================
+
+@Composable
+fun CreatorProfileScreen(
+    creatorId: String,
+    onClose: () -> Unit,
+    currentUser: UserProfile
+) {
+    val creators by AuraRepository.creatorsState.collectAsStateWithLifecycle()
+    val posts by AuraRepository.postsState.collectAsStateWithLifecycle()
+    val videos by AuraRepository.videosState.collectAsStateWithLifecycle()
+
+    val cr = creators.find { it.id == creatorId } ?: return
+
+    var selectedCreatorTab by remember { mutableStateOf("Posts") } // Posts, Videos, Live Replays, About
+
+    val creatorPosts = posts.filter { it.authorName == cr.name }
+    val creatorVideos = videos.filter { it.creatorId == cr.id && !it.title.contains("[LIVE REPLAY]") }
+    val creatorReplays = videos.filter { it.creatorId == cr.id && it.title.contains("[LIVE REPLAY]") }
+
+    val context = LocalContext.current
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF080B10))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+        ) {
+            // 1. Cover Photo & Back Button
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(140.dp)
+            ) {
+                AsyncImage(
+                    model = if (cr.banner.isNotBlank()) cr.banner else "https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=600",
+                    contentDescription = "cover banner",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+                IconButton(
+                    onClick = onClose,
+                    modifier = Modifier
+                        .padding(12.dp)
+                        .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                ) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "back", tint = Color.White)
+                }
+            }
+
+            // 2. Avatar profile header row
+            Row(
+                modifier = Modifier
+                    .padding(horizontal = 16.dp)
+                    .offset(y = (-30).dp),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .clip(CircleShape)
+                        .border(3.dp, Color(0xFFBD00FF), CircleShape)
+                ) {
+                    AsyncImage(model = cr.profilePic, contentDescription = "logo", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                }
+                
+                Column(modifier = Modifier.padding(start = 12.dp, bottom = 4.dp)) {
+                    Text(cr.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                    Text("@${cr.name.lowercase().replace(" ", "")}", color = Color(0xFF00E5FF), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            // 3. Stats section block
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .offset(y = (-15).dp),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                listOf(
+                    Pair("Followers", "${cr.followers}"),
+                    Pair("Posts", "${creatorPosts.size}"),
+                    Pair("Videos", "${creatorVideos.size}"),
+                    Pair("Replays", "${creatorReplays.size}")
+                ).forEach { stat ->
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(stat.second, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text(stat.first, color = Color.Gray, fontSize = 10.sp)
+                    }
+                }
+            }
+
+            // Bio description
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Text(cr.bio, color = Color.LightGray, fontSize = 13.sp)
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                // Follow / Send Message CTA buttons
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(
+                        onClick = {
+                            AuraRepository.toggleFollowCreator(cr.id)
+                            Toast.makeText(context, if (cr.isFollowed) "Unfollowed ${cr.name}" else "Now following ${cr.name}!", Toast.LENGTH_SHORT).show()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = if (cr.isFollowed) Color(0xFF1D2230) else Color(0xFFBD00FF)),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(if (cr.isFollowed) "Following" else "Follow Creator", color = Color.White)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // 4. SUB-TABS (Posts, Videos, Live Replays, About)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                listOf("Posts", "Videos", "Live Replays", "About").forEach { tabName ->
+                    val isTabSelected = selectedCreatorTab == tabName
+                    Box(
+                        modifier = Modifier
+                            .clickable { selectedCreatorTab = tabName }
+                            .padding(vertical = 8.dp)
+                            .border(
+                                width = if (isTabSelected) 1.5.dp else 0.dp,
+                                color = if (isTabSelected) Color(0xFF00E5FF) else Color.Transparent,
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .background(
+                                color = if (isTabSelected) Color(0xFF00E5FF).copy(alpha = 0.1f) else Color.Transparent,
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            tabName,
+                            color = if (isTabSelected) Color(0xFF00E5FF) else Color.LightGray,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+            Divider(color = Color(0xFF2B3245), thickness = 0.5.dp)
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Tab layouts container
+            Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+                when (selectedCreatorTab) {
+                    "Posts" -> {
+                        if (creatorPosts.isEmpty()) {
+                            Text("No posts published yet by this creator.", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.padding(16.dp))
+                        } else {
+                            creatorPosts.forEach { post ->
+                                CommunityPostItemCard(
+                                    post = post,
+                                    inlineCommentInputs = remember { mutableStateMapOf() },
+                                    currentUser = currentUser,
+                                    onClickCreator = {}
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                            }
+                        }
+                    }
+                    "Videos" -> {
+                        if (creatorVideos.isEmpty()) {
+                            Text("No video highlights uploaded by this creator.", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.padding(16.dp))
+                        } else {
+                            creatorVideos.forEach { video ->
+                                Card(
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF121620)),
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
+                                ) {
+                                    Row(modifier = Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        AsyncImage(model = video.thumbnail, contentDescription = "v", modifier = Modifier.size(70.dp).clip(RoundedCornerShape(6.dp)), contentScale = ContentScale.Crop)
+                                        Column {
+                                            Text(video.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                            Text(video.duration, color = Color(0xFF00E5FF), fontSize = 11.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "Live Replays" -> {
+                        if (creatorReplays.isEmpty()) {
+                            Text("No finished broadcast logs saved yet.", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.padding(16.dp))
+                        } else {
+                            creatorReplays.forEach { video ->
+                                Card(
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1D1220)),
+                                    border = BorderStroke(1.dp, Color(0xFFFF007A).copy(alpha = 0.3f)),
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
+                                ) {
+                                    Row(modifier = Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        AsyncImage(model = video.thumbnail, contentDescription = "v", modifier = Modifier.size(70.dp).clip(RoundedCornerShape(6.dp)), contentScale = ContentScale.Crop)
+                                        Column {
+                                            Text(video.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                            Text("Live session replay saved", color = Color(0xFFFF007A), fontSize = 11.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "About" -> {
+                        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF121620))) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text("CREATOR CREDENTIALS", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("Bio Details: ${cr.bio}", color = Color.LightGray, fontSize = 12.sp)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text("Verified ACT Community Creator since June 2026.", color = Color.Gray, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(50.dp))
+        }
+    }
+}
+
+// =========================================================================
+//  YOUTUBE-STYLE VIDEO PLAYER SCREEN OVERLAY (CONTROLS, PIP, COMMENTS)
+// =========================================================================
+
+@Composable
+fun VideoPlayerScreen(
+    videoId: String,
+    onClose: () -> Unit,
+    onTriggerPip: () -> Unit
+) {
+    val videos by AuraRepository.videosState.collectAsStateWithLifecycle()
+    val video = videos.find { it.id == videoId } ?: return
+
+    var isPaused by remember { mutableStateOf(false) }
+    var speedSetting by remember { mutableStateOf("1.0x") }
+    var qualitySetting by remember { mutableStateOf("1080p") }
+    var currentProgressSeconds by remember { mutableStateOf(44) }
+    var volumeScale by remember { mutableStateOf(0.85f) }
+    var showingSettingsDrawer by remember { mutableStateOf(false) }
+
+    var draftComment by remember { mutableStateOf("") }
+
+    val context = LocalContext.current
+
+    // Audio/Video player loop timer simulator
+    LaunchedEffect(isPaused) {
+        while (!isPaused) {
+            delay(1000)
+            if (currentProgressSeconds < 340) {
+                currentProgressSeconds += 1
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // 1. YouTube style responsive black viewport video player
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(230.dp)
+                    .background(Color(0xFF030303))
+            ) {
+                // Background visual poster
+                AsyncImage(
+                    model = video.thumbnail,
+                    contentDescription = "visual track",
+                    modifier = Modifier.fillMaxSize().alpha(if (isPaused) 0.5f else 0.85f),
+                    contentScale = ContentScale.Crop
+                )
+
+                // Seek bar / Title bar overlay controls
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    // Top: Title bar
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            IconButton(onClick = onClose) {
+                                Icon(Icons.Default.ArrowBack, contentDescription = "back", tint = Color.White)
+                            }
+                            Text(video.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(180.dp))
+                        }
+                        
+                        Row {
+                            IconButton(onClick = onTriggerPip) {
+                                Icon(Icons.Default.PictureInPicture, contentDescription = "PiP Miniaturize", tint = Color.White)
+                            }
+                            IconButton(onClick = { showingSettingsDrawer = !showingSettingsDrawer }) {
+                                Icon(Icons.Default.Settings, contentDescription = "Preferences", tint = Color.White)
+                            }
+                        }
+                    }
+
+                    // Center: Large Play/Pause Toggle Indicator
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .size(54.dp)
+                            .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                            .clickable { isPaused = !isPaused },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                            contentDescription = "play-pause-toggle",
+                            tint = Color.White,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+
+                    // Bottom: Seekbar layout
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            val curMins = String.format("%02d:%02d", currentProgressSeconds / 60, currentProgressSeconds % 60)
+                            Text(curMins, color = Color.White, fontSize = 9.sp)
+                            Text(video.duration, color = Color.LightGray, fontSize = 9.sp)
+                        }
+                        // Simple seek slider trace
+                        Slider(
+                            value = currentProgressSeconds.toFloat() / 340f,
+                            onValueChange = { currentProgressSeconds = (it * 340f).toInt() },
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color(0xFF00E5FF),
+                                activeTrackColor = Color(0xFF00E5FF),
+                                inactiveTrackColor = Color.DarkGray
+                            ),
+                            modifier = Modifier.height(14.dp)
+                        )
+                    }
+                }
+            }
+
+            // 2. Details drawers below (Title, creator badge, description details, comment feeds)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .background(Color(0xFF080B10))
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // Volume Adjuster row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = if (volumeScale == 0f) Icons.Default.VolumeMute else Icons.Default.VolumeUp,
+                        contentDescription = "volume",
+                        tint = Color.LightGray,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text("Volume: ${(volumeScale * 100).toInt()}%", color = Color.LightGray, fontSize = 10.sp)
+                    Slider(
+                        value = volumeScale,
+                        onValueChange = { volumeScale = it },
+                        modifier = Modifier.weight(1f).height(12.dp),
+                        colors = SliderDefaults.colors(thumbColor = Color(0xFFBD00FF), activeTrackColor = Color(0xFFBD00FF))
+                    )
+                }
+
+                Text(video.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                
+                // Creator Detail block
+                Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF121620))) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(modifier = Modifier.size(34.dp).clip(CircleShape)) {
+                                AsyncImage(model = video.creatorAvatar, contentDescription = "av", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                            }
+                            Column {
+                                Text(video.creatorName, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text("Pro Creator", color = Color(0xFF00E5FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Button(
+                            onClick = {
+                                AuraRepository.toggleLikeVideo(video.id)
+                                Toast.makeText(context, "Acknowledged matching feedback!", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBD00FF)),
+                            contentPadding = PaddingValues(horizontal = 12.dp)
+                        ) {
+                            Text("💖 LIKE VIDEO (${video.likes})", fontSize = 11.sp, color = Color.White)
+                        }
+                    }
+                }
+
+                // Expandable Description Info Card
+                Column {
+                    Text("Description Info:", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(video.description, color = Color.Gray, fontSize = 12.sp)
+                }
+
+                Divider(color = Color(0xFF2B3245), thickness = 0.5.dp)
+
+                // 3. Comments block section
+                Text("💬 DISCUSSION BOARD (${video.comments.size})", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                
+                // Add commentary row
+                if (video.allowComments) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = draftComment,
+                            onValueChange = { draftComment = it },
+                            placeholder = { Text("Post community feedback...", fontSize = 11.sp) },
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFFBD00FF)),
+                            singleLine = true
+                        )
+                        Button(
+                            onClick = {
+                                if (draftComment.isNotBlank()) {
+                                    AuraRepository.commentOnVideo(video.id, draftComment)
+                                    draftComment = ""
+                                    Toast.makeText(context, "Opinion saved!", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBD00FF))
+                        ) {
+                            Text("Post")
+                        }
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF1D1620), RoundedCornerShape(8.dp))
+                            .padding(12.dp)
+                    ) {
+                        Text("Interactive comments are disabled by the moderate publisher on this release.", color = Color.LightGray, fontSize = 12.sp)
+                    }
+                }
+
+                // Render video comment lists
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    video.comments.forEach { comment ->
+                        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF0A0F1D))) {
+                            Row(modifier = Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Box(modifier = Modifier.size(24.dp).clip(CircleShape).background(Color.Gray)) {
+                                    AsyncImage(model = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=150", contentDescription = "av", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                }
+                                Column {
+                                    Text(comment.authorName, color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                    Text(comment.commentText, color = Color.White, fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Configuration Preferences Settings Drawer
+        if (showingSettingsDrawer) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.6f))
+                    .clickable { showingSettingsDrawer = false },
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF121620)),
+                    border = BorderStroke(1.dp, Color(0xFF00E5FF))
+                ) {
+                    Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("VIDEO OPTIONS CONFIGURATION", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        
+                        // Select playback speeds
+                        Text("Playback Speed Selection:", color = Color.LightGray, fontSize = 11.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("0.5x", "1.0x", "1.5x", "2.0x").forEach { spd ->
+                                val active = speedSetting == spd
+                                Box(
+                                    modifier = Modifier
+                                        .background(if (active) Color(0xFF00E5FF) else Color(0xFF1D2230), RoundedCornerShape(4.dp))
+                                        .clickable { speedSetting = spd }
+                                        .padding(8.dp)
+                                ) {
+                                    Text(spd, color = if (active) Color.Black else Color.White, fontSize = 11.sp)
+                                }
+                            }
+                        }
+
+                        // Select HD resolution quality options
+                        Text("Select Stream Quality:", color = Color.LightGray, fontSize = 11.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("1080p", "720p", "480p").forEach { res ->
+                                val active = qualitySetting == res
+                                Box(
+                                    modifier = Modifier
+                                        .background(if (active) Color(0xFFBD00FF) else Color(0xFF1D2230), RoundedCornerShape(4.dp))
+                                        .clickable { qualitySetting = res }
+                                        .padding(8.dp)
+                                ) {
+                                    Text(res, color = Color.White, fontSize = 11.sp)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = { showingSettingsDrawer = false },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Confirm Preferences", color = Color.Black)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =========================================================================
+//  LIVE STREAM BROADCAST VIEWPORT AND CHAT CLIENT (hearts, end controls)
+// =========================================================================
+
+@Composable
+fun LiveStreamPlayerScreen(
+    streamId: String,
+    onClose: () -> Unit,
+    currentUser: UserProfile
+) {
+    val streams by AuraRepository.liveStreamsState.collectAsStateWithLifecycle()
+    val stream = streams.find { it.id == streamId } ?: return
+
+    var inputChatMsg by remember { mutableStateOf("") }
+    var reactionsCount by remember { mutableStateOf(0) }
+    
+    // Heart coordinates list for beautiful floating animations
+    val floatingHeartsCoordinates = remember { mutableStateListOf<Pair<Float, Float>>() }
+
+    val context = LocalContext.current
+
+    // Simulating background viewer commenting flow in live stream
+    LaunchedEffect(Unit) {
+        val listMsgs = listOf(
+            "NO WAY! The keyboard testing speed is crisp!",
+            "Chroma gears are sick tbh.",
+            "Can we moderate the keyboard inputs?",
+            "NINJA is online on next match",
+            "This co-op arena is legendary!",
+            "OMG! PENTA KILL!"
+        )
+        while (stream.isLive) {
+            delay(5000)
+            val randomText = listMsgs.random()
+            val sender = listOf("EliteGamer99", "DuckyCaps", "ChromaGlow", "AeroVans").random()
+            
+            // Append random commenter
+            AuraRepository.addLiveChatMessage(
+                streamId = streamId,
+                content = "[$sender]: $randomText"
+            )
+            
+            // Randomly flash hearts coordinates
+            val randX = (20..150).random().toFloat()
+            val randY = (150..340).random().toFloat()
+            floatingHeartsCoordinates.add(Pair(randX, randY))
+            if (floatingHeartsCoordinates.size > 8) {
+                floatingHeartsCoordinates.removeAt(0)
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // 1. Live camera viewfinder video overlay
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(260.dp)
+                    .background(Color(0xFF020202))
+            ) {
+                AsyncImage(model = stream.thumbnail, contentDescription = "viewfinder", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+
+                // Render pulsing RED indicator
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .background(Color(0xFFFF007A), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color.White))
+                                Text("LIVE", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Box(
+                            modifier = Modifier
+                                .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text("👁️ ${stream.viewerCount} watching", color = Color.White, fontSize = 10.sp)
+                        }
+                    }
+
+                    IconButton(
+                        onClick = onClose,
+                        modifier = Modifier.background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "close", tint = Color.White)
+                    }
+                }
+
+                // Creator Control overlay if creator matches
+                val isOwner = currentUser.id == stream.creatorId
+                if (isOwner && stream.isLive) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(12.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                AuraRepository.endLiveStream(stream.id)
+                                Toast.makeText(context, "Stream Converted & Replay video published!", Toast.LENGTH_LONG).show()
+                                onClose()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("END STREAM (SAVE TO VIDEOS REPLAY)", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                if (!stream.isLive) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.DarkGray.copy(alpha = 0.85f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("🔴 BROADCAST FINISHED", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            Text("Saved as Replay Video in community feed catalog.", color = Color.LightGray, fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                // Render floating animated coordinate hearts!
+                floatingHeartsCoordinates.forEach { coords ->
+                    Box(
+                        modifier = Modifier
+                            .offset(x = coords.first.dp, y = coords.second.dp)
+                            .size(20.dp)
+                    ) {
+                        Icon(Icons.Default.Favorite, contentDescription = "floating heart", tint = Color(0xFFFF007A))
+                    }
+                }
+            }
+
+            // 2. Stream titles details with live chat messages scroll
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .background(Color(0xFF0F121C))
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(stream.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text("Category: ${stream.category}", color = Color(0xFFFF007A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(Color(0xFF1D2230), CircleShape)
+                            .clickable {
+                                reactionsCount += 1
+                                floatingHeartsCoordinates.add(Pair((40..170).random().toFloat(), (120..220).random().toFloat()))
+                                Toast.makeText(context, "Reaction sent!", Toast.LENGTH_SHORT).show()
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Favorite, contentDescription = "heart pulse", tint = Color(0xFFFF007A))
+                    }
+                }
+
+                // Admin block / Pin controls
+                if (currentUser.role == UserRole.ADMIN) {
+                    Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF22161A))) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("STREAM CHAT MODERATION:", color = Color.LightGray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Button(
+                                    onClick = {
+                                        AuraRepository.pinLiveMessage(stream.id, "Follow stream guidelines or get kicked by ACT community moderators!")
+                                        Toast.makeText(context, "Guidelines pinned to stream!", Toast.LENGTH_SHORT).show()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF)),
+                                    contentPadding = PaddingValues(horizontal = 6.dp),
+                                    modifier = Modifier.height(28.dp)
+                                ) {
+                                    Text("Pin Rules", fontSize = 9.sp, color = Color.Black)
+                                }
+                                Button(
+                                    onClick = {
+                                        AuraRepository.muteLiveChatToggle(stream.id)
+                                        Toast.makeText(context, "Mute toggle action applied!", Toast.LENGTH_SHORT).show()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF007A)),
+                                    contentPadding = PaddingValues(horizontal = 6.dp),
+                                    modifier = Modifier.height(28.dp)
+                                ) {
+                                    Text("Toggle Mute", fontSize = 9.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Live stream pinned message box
+                stream.pinnedMessage?.let { pin ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF172030), RoundedCornerShape(6.dp))
+                            .border(1.dp, Color(0xFF00E5FF), RoundedCornerShape(6.dp))
+                            .padding(10.dp)
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.PushPin, contentDescription = "pin", tint = Color(0xFF00E5FF), modifier = Modifier.size(14.dp))
+                            Text(pin, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                // List of Chat commentary
+                Text("🔴 LIVE DISCUSSION FEED:", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .background(Color(0xFF0A0F1D))
+                        .padding(10.dp)
+                ) {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(stream.liveChat) { chatComment ->
+                            Text(
+                                text = if (chatComment.authorName.contains("[")) chatComment.commentText else "[${chatComment.authorName}]: ${chatComment.commentText}",
+                                color = if (chatComment.authorName == currentUser.displayName) Color(0xFFFF007A) else Color.White,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+                }
+
+                // Chat typing input box
+                if (stream.isLive && !stream.isMutedChat) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = inputChatMsg,
+                            onValueChange = { inputChatMsg = it },
+                            placeholder = { Text("Click to chat on live stream...", fontSize = 11.sp) },
+                            modifier = Modifier.weight(1f).height(46.dp),
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFFFF007A)),
+                            singleLine = true
+                        )
+                        Button(
+                            onClick = {
+                                if (inputChatMsg.isNotBlank()) {
+                                    AuraRepository.addLiveChatMessage(
+                                        streamId = stream.id,
+                                        content = "[${currentUser.displayName}]: $inputChatMsg"
+                                    )
+                                    inputChatMsg = ""
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF007A)),
+                            contentPadding = PaddingValues(0.dp),
+                            modifier = Modifier.size(46.dp)
+                        ) {
+                            Icon(Icons.Default.Send, contentDescription = "send chat", tint = Color.White, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                } else if (stream.isMutedChat) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF22161A), RoundedCornerShape(6.dp))
+                            .padding(10.dp)
+                    ) {
+                        Text("Interactive comments have been moderated/muted on this stream.", color = Color.LightGray, fontSize = 11.sp, textAlign = TextAlign.Center)
                     }
                 }
             }

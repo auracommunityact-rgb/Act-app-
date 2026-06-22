@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "988710586988",
+    "project_id": "act-3d04b",
+    "storage_bucket": "act-3d04b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:988710586988:android:7f77f64160d5e62191a649",
+        "android_client_info": {
+          "package_name": "com.aura.actapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDmMF34jwauYzh6mBf4RIFW3ytkXJxiSCQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
