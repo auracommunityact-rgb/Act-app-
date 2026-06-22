@@ -1,0 +1,2244 @@
+package com.example
+
+import android.app.DatePickerDialog
+import android.os.Bundle
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.*
+import androidx.compose.foundation.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.MailOutline
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
+import com.example.ui.theme.MyApplicationTheme
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.util.Calendar
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        setContent {
+            MyApplicationTheme {
+                MainAppContainer()
+            }
+        }
+    }
+}
+
+// Global active sub-tabs
+enum class AppTab {
+    HOME, STORE, GAMES, AI_COPILOT, ADMIN_DECK, PROFILE
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun MainAppContainer() {
+    val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    // Observe DB States
+    val currentUser by AuraRepository.currentUserState.collectAsStateWithLifecycle()
+    val banners by AuraRepository.bannersState.collectAsStateWithLifecycle()
+    val creators by AuraRepository.creatorsState.collectAsStateWithLifecycle()
+    val products by AuraRepository.productsState.collectAsStateWithLifecycle()
+    val news by AuraRepository.newsState.collectAsStateWithLifecycle()
+    val posts by AuraRepository.postsState.collectAsStateWithLifecycle()
+    val chatMessages by AuraRepository.chatMessagesState.collectAsStateWithLifecycle()
+    val games by AuraRepository.gamesState.collectAsStateWithLifecycle()
+    val notifications by AuraRepository.notificationsState.collectAsStateWithLifecycle()
+    val usersList by AuraRepository.usersListState.collectAsStateWithLifecycle()
+
+    // Screen navigation layout states
+    var currentTab by remember { mutableStateOf(AppTab.HOME) }
+    var showNotificationsDrawer by remember { mutableStateOf(false) }
+    var activeProductDetailId by remember { mutableStateOf<String?>(null) }
+    var activeCreatorDetailId by remember { mutableStateOf<String?>(null) }
+
+    // Onboarding form draft state
+    var onboardingStep by remember { mutableStateOf(1) }
+    var draftEmail by remember { mutableStateOf("") }
+    var draftPassword by remember { mutableStateOf("") }
+    var draftConfirmPass by remember { mutableStateOf("") }
+    var draftDisplayName by remember { mutableStateOf("") }
+    var draftProfilePic by remember { mutableStateOf("https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=200") }
+    var draftUsername by remember { mutableStateOf("") }
+    var draftBio by remember { mutableStateOf("") }
+    var draftDob by remember { mutableStateOf("2000-01-01") }
+    var draftCountry by remember { mutableStateOf("United States") }
+    val draftInterests = remember { mutableStateListOf<String>() }
+
+    // If user is banned, display banned message immediately
+    if (currentUser.isBanned) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF080B10))
+                .padding(32.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    "🚨 ACCESS PERMANENTLY REVOKED",
+                    color = Color(0xFFFF007A),
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF121620)),
+                    border = BorderStroke(1.dp, Color(0xFFFF007A).copy(alpha = 0.5f))
+                ) {
+                    Text(
+                        "Your account (${currentUser.email}) was flagged and banned by the moderator or admin for violating community guidelines. Contact support@auracommunity.com to challenge.",
+                        color = Color.LightGray,
+                        modifier = Modifier.padding(16.dp),
+                        textAlign = TextAlign.Center,
+                        fontSize = 14.sp
+                    )
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(
+                    onClick = {
+                        AuraRepository.resetToDefaults()
+                        Toast.makeText(context, "Resetting sandbox state", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF))
+                ) {
+                    Text("Re-validate Profile Sandbox", color = Color.Black)
+                }
+            }
+        }
+        return
+    }
+
+    // MANDATORY ONBOARDING COMPLIANCE
+    // "After signup, users must complete onboarding in multiple steps."
+    // "Only after completing all steps should the user be redirected to Home."
+    if (!currentUser.isOnboarded) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = Color(0xFF080B10)
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color(0xFF121620), Color(0xFF080B10))
+                        )
+                    )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp)
+                        .verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Top
+                ) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "AURA COMMUNITY PROFILE SETUP",
+                        color = Color(0xFF00E5FF),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 2.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    // Progress bars
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        for (i in 1..6) {
+                            val barColor = if (i <= onboardingStep) Color(0xFFBD00FF) else Color(0xFF2B3245)
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(barColor)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Step $onboardingStep of 6",
+                        color = Color.LightGray,
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    AnimatedContent(
+                        targetState = onboardingStep,
+                        transitionSpec = {
+                            fadeIn() + slideInHorizontally() togetherWith fadeOut() + slideOutHorizontally()
+                        },
+                        label = "onboard_steps"
+                    ) { step ->
+                        when (step) {
+                            1 -> {
+                                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                    Text("ENTER SECURITY CREDENTIALS", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                    OutlinedTextField(
+                                        value = draftEmail,
+                                        onValueChange = { draftEmail = it },
+                                        label = { Text("Email Address") },
+                                        modifier = Modifier.fillMaxWidth().testTag("onboard_email_input"),
+                                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF00E5FF))
+                                    )
+                                    OutlinedTextField(
+                                        value = draftPassword,
+                                        onValueChange = { draftPassword = it },
+                                        label = { Text("Password") },
+                                        visualTransformation = PasswordVisualTransformation(),
+                                        modifier = Modifier.fillMaxWidth().testTag("onboard_pass_input"),
+                                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF00E5FF))
+                                    )
+                                    OutlinedTextField(
+                                        value = draftConfirmPass,
+                                        onValueChange = { draftConfirmPass = it },
+                                        label = { Text("Confirm Password") },
+                                        visualTransformation = PasswordVisualTransformation(),
+                                        modifier = Modifier.fillMaxWidth().testTag("onboard_confirmpass_input"),
+                                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF00E5FF))
+                                    )
+
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Button(
+                                        onClick = {
+                                            if (draftEmail.isBlank() || draftPassword.isBlank()) {
+                                                Toast.makeText(context, "Fill in all credentials", Toast.LENGTH_SHORT).show()
+                                            } else if (draftPassword != draftConfirmPass) {
+                                                Toast.makeText(context, "Passwords do not match", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                onboardingStep = 2
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBD00FF)),
+                                        modifier = Modifier.fillMaxWidth().testTag("onboard_step1_next")
+                                    ) {
+                                        Text("Continue (Next Step)", fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                            2 -> {
+                                Column(verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("CUSTOMIZE AVATAR & NAME", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+
+                                    // Display name input
+                                    OutlinedTextField(
+                                        value = draftDisplayName,
+                                        onValueChange = { draftDisplayName = it },
+                                        label = { Text("Display Name") },
+                                        modifier = Modifier.fillMaxWidth().testTag("onboard_name_input"),
+                                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF00E5FF))
+                                    )
+
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text("Pick Preset Cyber Profile Avatar", color = Color.LightGray, fontSize = 13.sp)
+
+                                    // Interactive presets for profile picture
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        val avatarPresets = listOf(
+                                            "https://images.unsplash.com/photo-1566492031773-4f4e44671857?q=80&w=200", // Noob preset
+                                            "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=200", // Admin style
+                                            "https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?q=80&w=200", // Pro gamer presets
+                                            "https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=200"  // Cyber girl preset
+                                        )
+                                        avatarPresets.forEachIndexed { idx, url ->
+                                            val isSelected = draftProfilePic == url
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(60.dp)
+                                                    .clip(CircleShape)
+                                                    .border(2.dp, if (isSelected) Color(0xFF00E5FF) else Color.Transparent)
+                                                    .clickable { draftProfilePic = url }
+                                            ) {
+                                                AsyncImage(
+                                                    model = url,
+                                                    contentDescription = "preset $idx",
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    contentScale = ContentScale.Crop
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(24.dp))
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        Button(
+                                            onClick = { onboardingStep = 1 },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D2230)),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text("Back")
+                                        }
+                                        Button(
+                                            onClick = {
+                                                if (draftDisplayName.isBlank()) {
+                                                    Toast.makeText(context, "Please enter a display name", Toast.LENGTH_SHORT).show()
+                                                } else {
+                                                    onboardingStep = 3
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBD00FF)),
+                                            modifier = Modifier.weight(1.5f).testTag("onboard_step2_next")
+                                        ) {
+                                            Text("Continue")
+                                        }
+                                    }
+                                }
+                            }
+                            3 -> {
+                                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                    Text("CLAIM USERNAME & BIO", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                    OutlinedTextField(
+                                        value = draftUsername,
+                                        onValueChange = { draftUsername = it },
+                                        label = { Text("Unique Gaming Username") },
+                                        prefix = { Text("@") },
+                                        modifier = Modifier.fillMaxWidth().testTag("onboard_user_input"),
+                                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF00E5FF))
+                                    )
+                                    OutlinedTextField(
+                                        value = draftBio,
+                                        onValueChange = { draftBio = it },
+                                        label = { Text("Aura Gaming Bio (Short desc)") },
+                                        modifier = Modifier.fillMaxWidth().testTag("onboard_bio_input"),
+                                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF1D2230))
+                                    )
+
+                                    Spacer(modifier = Modifier.height(24.dp))
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        Button(
+                                            onClick = { onboardingStep = 2 },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D2230)),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text("Back")
+                                        }
+                                        Button(
+                                            onClick = {
+                                                if (draftUsername.isBlank() || draftBio.isBlank()) {
+                                                    Toast.makeText(context, "Fill tags & details", Toast.LENGTH_SHORT).show()
+                                                } else {
+                                                    onboardingStep = 4
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBD00FF)),
+                                            modifier = Modifier.weight(1.5f).testTag("onboard_step3_next")
+                                        ) {
+                                            Text("Continue")
+                                        }
+                                    }
+                                }
+                            }
+                            4 -> {
+                                Column(verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("BIRTHDAY & AUTO AGE ENFORCEMENT", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+
+                                    Text(
+                                        "Selected DOB: $draftDob",
+                                        color = Color(0xFF00E5FF),
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 18.sp
+                                    )
+
+                                    // DOB Date Dialog Picker
+                                    Button(
+                                        onClick = {
+                                            val calendar = Calendar.getInstance()
+                                            DatePickerDialog(
+                                                context,
+                                                { _, year, month, dayOfMonth ->
+                                                    val formattedMonth = String.format("%02d", month + 1)
+                                                    val formattedDay = String.format("%02d", dayOfMonth)
+                                                    draftDob = "$year-$formattedMonth-$formattedDay"
+                                                },
+                                                calendar.get(Calendar.YEAR) - 20,
+                                                calendar.get(Calendar.MONTH),
+                                                calendar.get(Calendar.DAY_OF_MONTH)
+                                            ).show()
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D2230)),
+                                        border = BorderStroke(1.dp, Color(0xFF00E5FF))
+                                    ) {
+                                        Text("📅 Trigger Date Dialog Picker", color = Color(0xFF00E5FF))
+                                    }
+
+                                    // Dynamic age calculation display
+                                    val computedAge = 2026 - draftDob.split("-")[0].toInt()
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1D2230))
+                                    ) {
+                                        Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text("Auto Calculated Age:", color = Color.LightGray, fontSize = 11.sp)
+                                            Text("$computedAge Years Old", color = Color(0xFFFF007A), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(24.dp))
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        Button(
+                                            onClick = { onboardingStep = 3 },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D2230)),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text("Back")
+                                        }
+                                        Button(
+                                            onClick = { onboardingStep = 5 },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBD00FF)),
+                                            modifier = Modifier.weight(1.5f).testTag("onboard_step4_next")
+                                        ) {
+                                            Text("Continue")
+                                        }
+                                    }
+                                }
+                            }
+                            5 -> {
+                                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                    Text("GEOGRAPHY & GAME PLAY INTERESTS", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+
+                                    // Country
+                                    OutlinedTextField(
+                                        value = draftCountry,
+                                        onValueChange = { draftCountry = it },
+                                        label = { Text("Country Location") },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF00E5FF))
+                                    )
+
+                                    Text("Select Core Interests (Multi-Click Tags):", color = Color.LightGray, fontSize = 13.sp)
+
+                                    val availableInterests = listOf("Gaming Laptops", "Gaming Phones", "Gaming Keyboards", "Mini Games", "Online Matchmaking", "FPS Tournaments", "Retro Arcade")
+
+                                    FlowRow(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        availableInterests.forEach { tag ->
+                                            val isSelected = draftInterests.contains(tag)
+                                            val chipBg = if (isSelected) Color(0xFF00E5FF) else Color(0xFF1D2230)
+                                            val chipTx = if (isSelected) Color.Black else Color.White
+                                            Box(
+                                                modifier = Modifier
+                                                    .border(1.dp, Color(0xFF2B3245), RoundedCornerShape(16.dp))
+                                                    .clip(RoundedCornerShape(16.dp))
+                                                    .background(chipBg)
+                                                    .clickable {
+                                                        if (isSelected) draftInterests.remove(tag) else draftInterests.add(tag)
+                                                    }
+                                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                                            ) {
+                                                Text(tag, color = chipTx, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(24.dp))
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        Button(
+                                            onClick = { onboardingStep = 4 },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D2230)),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text("Back")
+                                        }
+                                        Button(
+                                            onClick = {
+                                                if (draftInterests.isEmpty()) {
+                                                    Toast.makeText(context, "Select at least 1 interest tag", Toast.LENGTH_SHORT).show()
+                                                } else {
+                                                    onboardingStep = 6
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBD00FF)),
+                                            modifier = Modifier.weight(1.5f).testTag("onboard_step5_next")
+                                        ) {
+                                            Text("Continue")
+                                        }
+                                    }
+                                }
+                            }
+                            6 -> {
+                                Column(verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("VERIFY PROFILE DETAILS", color = Color(0xFF00FF85), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+
+                                    Box(
+                                        modifier = Modifier
+                                            .size(80.dp)
+                                            .clip(CircleShape)
+                                    ) {
+                                        AsyncImage(model = draftProfilePic, contentDescription = "avatar", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                    }
+
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = Color(0xFF121620)),
+                                        border = BorderStroke(1.dp, Color(0xFF2B3245))
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text("Email: $draftEmail", color = Color.White)
+                                            Text("Display Name: $draftDisplayName", color = Color.White)
+                                            Text("Username: @$draftUsername", color = Color(0xFF00E5FF))
+                                            Text("Bio: $draftBio", color = Color.LightGray)
+                                            Text("DOB / Age: $draftDob", color = Color.White)
+                                            Text("Country: $draftCountry", color = Color.White)
+                                            Text("Interests: ${draftInterests.joinToString()}", color = Color(0xFFBD00FF))
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(24.dp))
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        Button(
+                                            onClick = { onboardingStep = 5 },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D2230)),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text("Back")
+                                        }
+                                        Button(
+                                            onClick = {
+                                                // Create profile and navigate
+                                                val profile = UserProfile(
+                                                    id = "user_" + System.currentTimeMillis(),
+                                                    email = draftEmail,
+                                                    displayName = draftDisplayName,
+                                                    username = draftUsername,
+                                                    bio = draftBio,
+                                                    profilePic = draftProfilePic,
+                                                    birthDate = draftDob,
+                                                    country = draftCountry,
+                                                    interests = draftInterests.toList(),
+                                                    role = UserRole.COMMUNITY_MEMBER, // Automatically becomes active community member
+                                                    isOnboarded = true
+                                                )
+                                                AuraRepository.createAndOnboardUser(profile)
+                                                Toast.makeText(context, "Aura profile synced! Welcome.", Toast.LENGTH_LONG).show()
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF85)),
+                                            modifier = Modifier.weight(1.5f).testTag("onboard_step6_finish")
+                                        ) {
+                                            Text("Launch Account", color = Color.Black, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return
+    }
+
+    // --- MAIN LOGGED-IN SYSTEM TEMPLATE ---
+    Scaffold(
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("main_app_scaffold"),
+        containerColor = Color(0xFF080B10),
+        topBar = {
+            Column {
+                // Top Navbar Title
+                Surface(
+                    color = Color(0xFF121620),
+                    border = BorderStroke(1.dp, Color(0xFF2B3245).copy(alpha = 0.5f))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .statusBarsPadding()
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        // Title/Logo
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "ACT",
+                                color = Color(0xFF00E5FF),
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 21.sp,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.testTag("app_logo")
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                "Aura Gaming",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            // Badge with active switcher role
+                            Box(
+                                modifier = Modifier
+                                    .background(Color(0xFFBD00FF).copy(alpha = 0.15f), RoundedCornerShape(12.dp))
+                                    .border(1.dp, Color(0xFFBD00FF).copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = currentUser.role.name,
+                                    color = Color(0xFFBD00FF),
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        // Notifications drawer & Chat shortcuts
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // Notifications badge trigger
+                            Box {
+                                IconButton(
+                                    onClick = { showNotificationsDrawer = !showNotificationsDrawer },
+                                    modifier = Modifier.testTag("top_notif_icon")
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.Notifications,
+                                        contentDescription = "Notifications Drawer",
+                                        tint = if (notifications.isNotEmpty()) Color(0xFF00E5FF) else Color.White
+                                    )
+                                }
+                                if (notifications.isNotEmpty()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .offset(x = (-4).dp, y = 4.dp)
+                                            .size(8.dp)
+                                            .background(Color(0xFFFF007A), CircleShape)
+                                    )
+                                }
+                            }
+                            IconButton(onClick = { currentTab = AppTab.AI_COPILOT }) {
+                                Icon(Icons.Outlined.ChatBubbleOutline, contentDescription = "AI Copilot Launcher", tint = Color.LightGray)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        bottomBar = {
+            NavigationBar(
+                containerColor = Color(0xFF121620),
+                modifier = Modifier.navigationBarsPadding(),
+                tonalElevation = 8.dp
+            ) {
+                NavigationBarItem(
+                    selected = currentTab == AppTab.HOME,
+                    onClick = { currentTab = AppTab.HOME },
+                    icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
+                    label = { Text("Home", fontSize = 11.sp) },
+                    colors = NavigationBarItemDefaults.colors(selectedIconColor = Color(0xFF00E5FF), indicatorColor = Color(0xFF1D2230))
+                )
+                NavigationBarItem(
+                    selected = currentTab == AppTab.STORE,
+                    onClick = { currentTab = AppTab.STORE },
+                    icon = { Icon(Icons.Default.ShoppingCart, contentDescription = "Store") },
+                    label = { Text("Store", fontSize = 11.sp) },
+                    colors = NavigationBarItemDefaults.colors(selectedIconColor = Color(0xFF00E5FF), indicatorColor = Color(0xFF1D2230))
+                )
+                NavigationBarItem(
+                    selected = currentTab == AppTab.GAMES,
+                    onClick = { currentTab = AppTab.GAMES },
+                    icon = { Icon(Icons.Default.VideogameAsset, contentDescription = "Arcade") },
+                    label = { Text("Arcade", fontSize = 11.sp) },
+                    colors = NavigationBarItemDefaults.colors(selectedIconColor = Color(0xFF00E5FF), indicatorColor = Color(0xFF1D2230))
+                )
+                NavigationBarItem(
+                    selected = currentTab == AppTab.AI_COPILOT,
+                    onClick = { currentTab = AppTab.AI_COPILOT },
+                    icon = { Icon(Icons.Default.Psychology, contentDescription = "Aura AI") },
+                    label = { Text("Aura AI", fontSize = 11.sp) },
+                    colors = NavigationBarItemDefaults.colors(selectedIconColor = Color(0xFF00E5FF), indicatorColor = Color(0xFF1D2230))
+                )
+                NavigationBarItem(
+                    selected = currentTab == AppTab.ADMIN_DECK,
+                    onClick = { currentTab = AppTab.ADMIN_DECK },
+                    icon = { Icon(Icons.Default.Dashboard, contentDescription = "Admin") },
+                    label = { Text("Admin", fontSize = 11.sp) },
+                    colors = NavigationBarItemDefaults.colors(selectedIconColor = Color(0xFFBD00FF), indicatorColor = Color(0xFF1D2230))
+                )
+                NavigationBarItem(
+                    selected = currentTab == AppTab.PROFILE,
+                    onClick = { currentTab = AppTab.PROFILE },
+                    icon = { Icon(Icons.Default.Person, contentDescription = "Profile") },
+                    label = { Text("Profile", fontSize = 11.sp) },
+                    colors = NavigationBarItemDefaults.colors(selectedIconColor = Color(0xFF00E5FF), indicatorColor = Color(0xFF1D2230))
+                )
+            }
+        }
+    ) { innerPadding ->
+
+        // Global sliding drawer/dismiss overlay for real-time notifications
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
+            // Main tab router content
+            AnimatedContent(
+                targetState = currentTab,
+                transitionSpec = {
+                    fadeIn() togetherWith fadeOut()
+                },
+                label = "app_tabs_anim"
+            ) { tab ->
+                when (tab) {
+                    AppTab.HOME -> HomeTabScreen(
+                        banners, creators, products, news, posts, currentUser,
+                        onClickCreator = { activeCreatorDetailId = it },
+                        onClickProduct = { activeProductDetailId = it },
+                        onClickViewAllStore = { currentTab = AppTab.STORE }
+                    )
+                    AppTab.STORE -> StoreTabScreen(
+                        products,
+                        onProductClick = { activeProductDetailId = it }
+                    )
+                    AppTab.GAMES -> GamesTabScreen(games)
+                    AppTab.AI_COPILOT -> AIHelperTabScreen()
+                    AppTab.ADMIN_DECK -> AdminDashboardTabScreen(
+                        usersList, products, games, news, posts, banners, creators, notifications,
+                        onSwitchToAdmin = { AuraRepository.switchUserRole(UserRole.ADMIN) }
+                    )
+                    AppTab.PROFILE -> ProfileTabScreen(currentUser, posts)
+                }
+            }
+
+            // Real-time broadcast notification logs overlay shelf
+            if (showNotificationsDrawer) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.5f))
+                        .clickable { showNotificationsDrawer = false }
+                ) {
+                    Card(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .width(310.dp)
+                            .fillMaxHeight(0.7f)
+                            .padding(8.dp)
+                            .clickable(enabled = false) {},
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF121620)),
+                        border = BorderStroke(1.dp, Color(0xFF2B3245))
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("NOTIFICATIONS", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                TextButton(onClick = { AuraRepository.resetToDefaults() }) {
+                                    Text("Clear", color = Color.LightGray, fontSize = 11.sp)
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            if (notifications.isEmpty()) {
+                                Text("All caught up! No recent alerts.", color = Color.Gray, fontSize = 12.sp)
+                            }
+                            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                items(notifications) { notif ->
+                                    val icon = when (notif.type) {
+                                        "shop" -> "🛒"
+                                        "game" -> "🎮"
+                                        "chat" -> "💬"
+                                        "news" -> "⚡"
+                                        else -> "🤖"
+                                    }
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(Color(0xFF1D2230), RoundedCornerShape(8.dp))
+                                            .padding(10.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(icon)
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(notif.title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            Text(notif.description, color = Color.LightGray, fontSize = 11.sp)
+                                            Text(notif.timestamp, color = Color.Gray, fontSize = 9.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Products display modal overlay
+            activeProductDetailId?.let { pId ->
+                val prd = products.find { it.id == pId }
+                if (prd != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.6f))
+                            .clickable { activeProductDetailId = null },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth(0.9f)
+                                .padding(16.dp)
+                                .clickable(enabled = false) {},
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF121620)),
+                            border = BorderStroke(1.dp, Color(0xFF00E5FF))
+                        ) {
+                            Column(modifier = Modifier.padding(18.dp)) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(180.dp)
+                                        .align(Alignment.CenterHorizontally)
+                                        .clip(RoundedCornerShape(8.dp))
+                                ) {
+                                    AsyncImage(
+                                        model = prd.image,
+                                        contentDescription = "product pic",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(8.dp)
+                                            .size(36.dp)
+                                            .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                                            .clickable { AuraRepository.toggleProductWishlist(prd.id) },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            if (prd.isWishlisted) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                            contentDescription = "wish",
+                                            tint = if (prd.isWishlisted) Color.Red else Color.White
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(prd.name, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                Text(prd.category, color = Color(0xFFBD00FF), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Star, contentDescription = "stars", tint = Color(0xFFFFB800), modifier = Modifier.size(16.dp))
+                                    Text(" ${prd.rating} rating", color = Color.White, fontSize = 12.sp)
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(prd.description, color = Color.LightGray, fontSize = 13.sp)
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "$${prd.price}",
+                                        color = Color(0xFF00E5FF),
+                                        fontSize = 20.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Button(
+                                        onClick = {
+                                            Toast.makeText(context, "Direct Checkout Secured! $${prd.price} pre-approved.", Toast.LENGTH_LONG).show()
+                                            activeProductDetailId = null
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF85))
+                                    ) {
+                                        Text("Buy Direct", color = Color.Black, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Creator profile detail modal overlay
+            activeCreatorDetailId?.let { cId ->
+                val cr = creators.find { it.id == cId }
+                if (cr != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.6f))
+                            .clickable { activeCreatorDetailId = null },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth(0.9f)
+                                .padding(16.dp)
+                                .clickable(enabled = false) {},
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF121620)),
+                            border = BorderStroke(1.dp, Color(0xFFBD00FF))
+                        ) {
+                            Column(modifier = Modifier.padding(18.dp)) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(100.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                ) {
+                                    AsyncImage(
+                                        model = if (cr.banner.isNotBlank()) cr.banner else "https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=600",
+                                        contentDescription = "banner",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.offset(y = (-30).dp).padding(horizontal = 12.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(70.dp)
+                                            .clip(CircleShape)
+                                            .border(2.dp, Color(0xFFBD00FF), CircleShape)
+                                    ) {
+                                        AsyncImage(model = cr.profilePic, contentDescription = "creator", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                    }
+                                    Column(modifier = Modifier.padding(top = 34.dp, start = 8.dp)) {
+                                        Text(cr.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                        Text("${cr.followers} followers", color = Color.LightGray, fontSize = 12.sp)
+                                    }
+                                }
+
+                                Text("About Creator:", color = Color(0xFF00E5FF), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(cr.bio, color = Color.LightGray, fontSize = 13.sp)
+
+                                Spacer(modifier = Modifier.height(20.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            AuraRepository.toggleFollowCreator(cr.id)
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = if (cr.isFollowed) Color(0xFF1D2230) else Color(0xFFBD00FF)),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(if (cr.isFollowed) "Following" else "Follow Creator", color = Color.White)
+                                    }
+                                    Button(
+                                        onClick = {
+                                            currentTab = AppTab.AI_COPILOT
+                                            activeCreatorDetailId = null
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF)),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Send Message", color = Color.Black)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==========================================
+//                 HOME TAB SCREEN
+// ==========================================
+
+@Composable
+fun HomeTabScreen(
+    banners: List<HeroBanner>,
+    creators: List<Creator>,
+    products: List<Product>,
+    newsList: List<NewsItem>,
+    posts: List<Post>,
+    currentUser: UserProfile,
+    onClickCreator: (String) -> Unit,
+    onClickProduct: (String) -> Unit,
+    onClickViewAllStore: () -> Unit
+) {
+    var newPostText by remember { mutableStateOf("") }
+    var selectedPostBg by remember { mutableStateOf<String?>(null) }
+    val postBgs = listOf(
+        "https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=300",
+        "https://images.unsplash.com/photo-1511512578047-dfb367046420?q=80&w=300",
+        "https://images.unsplash.com/photo-1606144042614-b2417e99c4e3?q=80&w=300"
+    )
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("home_view"),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
+    ) {
+
+        // 1. HERO BANNERS FLOW
+        if (banners.isNotEmpty()) {
+            item {
+                Text("💥 HOT EVENTS TODAY", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                Spacer(modifier = Modifier.height(6.dp))
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(banners) { banner ->
+                        Card(
+                            modifier = Modifier
+                                .width(280.dp)
+                                .height(160.dp),
+                            border = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.3f))
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                AsyncImage(model = banner.image, contentDescription = "banner", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(
+                                            Brush.verticalGradient(
+                                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f))
+                                            )
+                                        )
+                                )
+                                Column(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomStart)
+                                        .padding(12.dp)
+                                ) {
+                                    Text(banner.headline, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    Text(banner.description, color = Color.LightGray, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .background(Color(0xFF00E5FF), RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(banner.ctaText, color = Color.Black, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. HORIZONTAL CREATORS BAR
+        if (creators.isNotEmpty()) {
+            item {
+                Text("🔥 PRO GAMING CREATORS", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                Spacer(modifier = Modifier.height(6.dp))
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    items(creators) { cr ->
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.clickable { onClickCreator(cr.id) }
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(54.dp)
+                                    .clip(CircleShape)
+                                    .border(2.dp, if (cr.isFollowed) Color(0xFF00E5FF) else Color(0xFFBD00FF), CircleShape)
+                            ) {
+                                AsyncImage(
+                                    model = cr.profilePic,
+                                    contentDescription = "creator profile",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(cr.name, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("${cr.followers} follow", color = Color.Gray, fontSize = 9.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. PRODUCTS PREVIEW ROW
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("⚡ CHROMA GEAR SHOP", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                TextButton(onClick = onClickViewAllStore) {
+                    Text("VIEW ALL STORE", color = Color(0xFF00E5FF), fontSize = 11.sp)
+                }
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(products.take(4)) { prd ->
+                    Card(
+                        modifier = Modifier
+                            .width(140.dp)
+                            .clickable { onClickProduct(prd.id) },
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF121620))
+                    ) {
+                        Column {
+                            AsyncImage(
+                                model = prd.image,
+                                contentDescription = "gear preview",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(80.dp),
+                                contentScale = ContentScale.Crop
+                            )
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Text(prd.name, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("$${prd.price}", color = Color(0xFF00E5FF), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. LATEST GAMING NEWS
+        item {
+            Text("⚡ LATEST ACT NEWS TILES", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+            Spacer(modifier = Modifier.height(6.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                newsList.forEach { newsItem ->
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF121620)),
+                        border = BorderStroke(1.dp, Color(0xFF2B3245).copy(alpha = 0.5f))
+                    ) {
+                        Row(modifier = Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            AsyncImage(
+                                model = newsItem.image,
+                                contentDescription = "news pic",
+                                modifier = Modifier
+                                    .size(70.dp)
+                                    .clip(RoundedCornerShape(4.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(newsItem.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                Text(newsItem.description, color = Color.LightGray, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(newsItem.publishDate, color = Color.Gray, fontSize = 9.sp)
+                                    Text("Official News", color = Color(0xFFBD00FF), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. COMMUNITY POST PUBLISHER CREATOR
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF121620)),
+                border = BorderStroke(1.dp, Color(0xFFBD00FF).copy(alpha = 0.3f))
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text("📢 SHARE TO THE COMM COMMUNITY", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = newPostText,
+                        onValueChange = { newPostText = it },
+                        placeholder = { Text("What gaming is on your mind?", fontSize = 12.sp) },
+                        modifier = Modifier.fillMaxWidth().testTag("community_post_input"),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFFBD00FF))
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Quick backdrop selector
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            postBgs.forEach { bgUrl ->
+                                val isSelected = selectedPostBg == bgUrl
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .border(1.dp, if (isSelected) Color(0xFF00E5FF) else Color.Transparent)
+                                        .clickable { selectedPostBg = if (isSelected) null else bgUrl }
+                                ) {
+                                    AsyncImage(model = bgUrl, contentDescription = "bg", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                }
+                            }
+                        }
+                        Button(
+                            onClick = {
+                                if (newPostText.isNotBlank()) {
+                                    AuraRepository.createPost(newPostText, selectedPostBg)
+                                    newPostText = ""
+                                    selectedPostBg = null
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBD00FF)),
+                            modifier = Modifier.testTag("submit_post_btn")
+                        ) {
+                            Text("Post Now", color = Color.White)
+                        }
+                    }
+                }
+            }
+        }
+
+        // 6. REAL-TIME PLAY FEED
+        item {
+            Text("📢 COMMUNITY STREAM FEED", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        }
+
+        items(posts) { post ->
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF121620)),
+                border = BorderStroke(1.dp, Color(0xFF2B3245))
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                        ) {
+                            AsyncImage(model = post.authorAvatar, contentDescription = "av", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                        }
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(post.authorName, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                if (post.authorRole == UserRole.ADMIN) {
+                                    Text("ADMIN", color = Color(0xFFFF007A), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            Text("@author", color = Color.Gray, fontSize = 10.sp)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(post.content, color = Color.White, fontSize = 13.sp)
+
+                    post.image?.let { img ->
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(160.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                        ) {
+                            AsyncImage(model = img, contentDescription = "post asset", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Divider(color = Color(0xFF2B3245), thickness = 0.5.dp)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = { AuraRepository.toggleLikePost(post.id) }) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    if (post.isLiked) Icons.Default.ThumbUp else Icons.Default.ThumbUp,
+                                    tint = if (post.isLiked) Color(0xFF00E5FF) else Color.Gray,
+                                    contentDescription = "like"
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("${post.likes}", color = Color.LightGray, fontSize = 11.sp)
+                            }
+                        }
+                        IconButton(onClick = {}) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Comment, tint = Color.Gray, contentDescription = "comment")
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("${post.comments.size}", color = Color.LightGray, fontSize = 11.sp)
+                            }
+                        }
+                        IconButton(onClick = {}) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Share, tint = Color.Gray, contentDescription = "share")
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("${post.shares}", color = Color.LightGray, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==========================================
+//                 STORE TAB
+// ==========================================
+
+@Composable
+fun StoreTabScreen(
+    products: List<Product>,
+    onProductClick: (String) -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedCategory by remember { mutableStateOf("All Categories") }
+
+    val categories = listOf(
+        "All Categories", "Gaming Phones", "Gaming Laptops",
+        "Gaming Keyboards", "Gaming Mouse", "Gaming Headsets",
+        "Gaming Controllers", "Gaming Chairs", "Gaming Accessories"
+    )
+
+    val filteredProducts = products.filter {
+        (selectedCategory == "All Categories" || it.category == selectedCategory) &&
+                (searchQuery.isBlank() || it.name.contains(searchQuery, ignoreCase = true) || it.description.contains(searchQuery, ignoreCase = true))
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .testTag("store_view"),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text("🛒 CHROMA STATIONS STORE", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+
+        // Search Bar input
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            placeholder = { Text("Search gaming gear, laptops, chairs...") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "search icon") },
+            modifier = Modifier.fillMaxWidth().testTag("product_search_input"),
+            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF00E5FF))
+        )
+
+        // Categories selector
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(categories) { cat ->
+                val isSelected = selectedCategory == cat
+                Box(
+                    modifier = Modifier
+                        .border(1.dp, if (isSelected) Color(0xFF00E5FF) else Color(0xFF2B3245), RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(if (isSelected) Color(0xFF00E5FF).copy(alpha = 0.15f) else Color.Transparent)
+                        .clickable { selectedCategory = cat }
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                ) {
+                    Text(cat, color = if (isSelected) Color(0xFF00E5FF) else Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        Divider(color = Color(0xFF2B3245), thickness = 0.5.dp)
+
+        // Product Grid list
+        if (filteredProducts.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("No items found. Change filters or search terms.", color = Color.Gray)
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                items(filteredProducts) { prd ->
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF121620)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onProductClick(prd.id) }
+                    ) {
+                        Column {
+                            Box(modifier = Modifier.height(100.dp).fillMaxWidth()) {
+                                AsyncImage(
+                                    model = prd.image,
+                                    contentDescription = "product picture",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(4.dp)
+                                        .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                ) {
+                                    Text("$${prd.price}", color = Color(0xFF00E5FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(prd.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(prd.category, color = Color.Gray, fontSize = 9.sp)
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Star, contentDescription = "rating", tint = Color(0xFFFFB800), modifier = Modifier.size(12.dp))
+                                        Text(" ${prd.rating}", color = Color.White, fontSize = 10.sp)
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .background(Color(0xFFBD00FF).copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                                            .border(1.dp, Color(0xFFBD00FF), RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text("View Specs", color = Color(0xFFBD00FF), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==========================================
+//                 GAMES TAB SCREEN
+// ==========================================
+
+@Composable
+fun GamesTabScreen(
+    games: List<GameItem>
+) {
+    var activeArcadeGame by remember { mutableStateOf<String?>(null) } // "snake", "racer", "memory", or "multip"
+    var matchLogs by remember { mutableStateOf(listOf<String>()) }
+    var inMatchmaking by remember { mutableStateOf(false) }
+
+    LaunchedEffect(inMatchmaking) {
+        if (inMatchmaking) {
+            matchLogs = listOf("🔍 Pinging ACT servers...", "📡 Found matchmaking pools...")
+            delay(1500)
+            matchLogs = matchLogs + "🔗 Paired with Opponent: 'SniperApex_99'"
+            delay(1200)
+            matchLogs = matchLogs + "🚦 Match Loaded! Multi Racing ready!"
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .testTag("games_view"),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Text("🎮 WINZO-STYLE ARCADE STATIONS", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+
+        if (activeArcadeGame != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "◀ RETURN TO GAMING HUB",
+                    color = Color(0xFF00E5FF),
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable { activeArcadeGame = null }.testTag("btn_close_game"),
+                    fontSize = 13.sp
+                )
+            }
+            Divider(color = Color(0xFF2B3245))
+
+            when (activeArcadeGame) {
+                "snake" -> NeonSnakeGame(onGameFinished = {})
+                "racer" -> CyberStreetRacerGame(onGameFinished = {})
+                "memory" -> MemoryMatchTilesGame(onGameFinished = {})
+                "multip" -> {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF121620)),
+                        border = BorderStroke(1.dp, Color(0xFFBD00FF))
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
+                            Text("🎮 TIC-TAC-TOE MULTIPLAYER ARENA", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            Spacer(modifier = Modifier.height(12.dp))
+                            if (!inMatchmaking) {
+                                Button(
+                                    onClick = { inMatchmaking = true },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBD00FF)),
+                                    modifier = Modifier.testTag("trigger_matchmaking")
+                                ) {
+                                    Text("Find Live Opponent")
+                                }
+                            } else {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    matchLogs.forEach { log ->
+                                        Text(log, color = Color(0xFF00E5FF), fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                                    }
+                                    if (matchLogs.size >= 4) {
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Text("❌ [Simulation Match] Opponent connection timed out. Restart matchmaking.", color = Color.LightGray, fontSize = 12.sp)
+                                        Button(onClick = { inMatchmaking = false }) {
+                                            Text("Retry Search")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return
+        }
+
+        // Mini games selector list
+        Text("Playable Classical Retro Games:", color = Color.LightGray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF121620)),
+            border = BorderStroke(1.dp, Color(0xFF2B3245))
+        ) {
+            Column(modifier = Modifier.padding(12.dp).fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.clickable { activeArcadeGame = "snake" }) {
+                    Box(modifier = Modifier.size(50.dp).background(Color(0xFF1D2230), RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
+                        Text("🐍", fontSize = 24.sp)
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Neon Snake Arcade", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("Grid arena snake with speed increments.", color = Color.LightGray, fontSize = 11.sp)
+                    }
+                    Icon(Icons.Default.PlayArrow, contentDescription = "play", tint = Color(0xFF00E5FF))
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.clickable { activeArcadeGame = "racer" }) {
+                    Box(modifier = Modifier.size(50.dp).background(Color(0xFF1D2230), RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
+                        Text("🏎️", fontSize = 24.sp)
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Cyber Street Racer", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("Fast reflex obstacle dodge tracker.", color = Color.LightGray, fontSize = 11.sp)
+                    }
+                    Icon(Icons.Default.PlayArrow, contentDescription = "play", tint = Color(0xFF00E5FF))
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.clickable { activeArcadeGame = "memory" }) {
+                    Box(modifier = Modifier.size(50.dp).background(Color(0xFF1D2230), RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
+                        Text("🧠", fontSize = 24.sp)
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Match-Tiles Memory Match", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("Coordinate identical cyber symbols.", color = Color.LightGray, fontSize = 11.sp)
+                    }
+                    Icon(Icons.Default.PlayArrow, contentDescription = "play", tint = Color(0xFF00E5FF))
+                }
+            }
+        }
+
+        // Matchmaking Board
+        Text("Online Board Tournaments:", color = Color.LightGray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF121620)),
+            modifier = Modifier.clickable { activeArcadeGame = "multip" }
+        ) {
+            Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("⚔️", fontSize = 24.sp)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Tic-Tac-Toe Online", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text("Queue matching, challenge friends or AI clones.", color = Color.LightGray, fontSize = 11.sp)
+                }
+                Icon(Icons.Default.People, contentDescription = "online", tint = Color(0xFFBD00FF))
+            }
+        }
+
+        // Dynamically added list of games without coding
+        Text("Dynamically Spawned / Admin Added Games:", color = Color.LightGray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            val customGamesOnly = games.filter { it.category == "Admin Added" }
+            if (customGamesOnly.isEmpty()) {
+                item {
+                    Text("No custom games loaded. Log in as admin to upload game files.", color = Color.Gray, fontSize = 11.sp)
+                }
+            } else {
+                items(customGamesOnly) { gm ->
+                    Card(
+                        modifier = Modifier.width(130.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF172030))
+                    ) {
+                        Column {
+                            AsyncImage(model = gm.thumbnail, contentDescription = "thumb", modifier = Modifier.height(70.dp).fillMaxWidth(), contentScale = ContentScale.Crop)
+                            Text(gm.name, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(6.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==========================================
+//               GEMINI AI SCREEN
+// ==========================================
+
+@Composable
+fun AIHelperTabScreen() {
+    var promptInput by remember { mutableStateOf("") }
+    var responsesLog by remember { mutableStateOf(listOf(Pair("AI COPILOT", "Welcome cyber warrior! I'm Aura AI. Ask me strategy patterns, cyber gear checklist specs, or generate custom games trivia trivia."))) }
+    var isLoadingResponse by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .testTag("ai_helper_view"),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text("🤖 AURA CO-PILOT (INTELLIGENCE MODEL)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        Text("Powered directly by models/gemini-3.5-flash", color = Color(0xFFBD00FF), fontSize = 11.sp)
+
+        // Conversation history log
+        Box(
+            modifier = Modifier
+                .background(Color(0xFF0F131C), RoundedCornerShape(8.dp))
+                .border(1.dp, Color(0xFF2B3245), RoundedCornerShape(8.dp))
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(10.dp)
+        ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                reverseLayout = true
+            ) {
+                // Display in reverse order for messaging logic
+                items(responsesLog.reversed()) { chat ->
+                    val isUser = chat.first == "YOU"
+                    val bubbleColor = if (isUser) Color(0xFFBD00FF).copy(alpha = 0.2f) else Color(0xFF1D2230)
+                    val bubbleAlign = if (isUser) Alignment.End else Alignment.Start
+                    val bubbleBorder = if (isUser) Color(0xFFBD00FF) else Color(0xFF00E5FF)
+
+                    Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = bubbleAlign) {
+                        Text(chat.first, color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = bubbleColor),
+                            border = BorderStroke(1.dp, bubbleBorder),
+                            modifier = Modifier.widthIn(max = 240.dp)
+                        ) {
+                            Text(chat.second, color = Color.White, fontSize = 12.sp, modifier = Modifier.padding(10.dp))
+                        }
+                    }
+                }
+            }
+
+            if (isLoadingResponse) {
+                Box(modifier = Modifier.align(Alignment.BottomCenter).background(Color.Black).padding(6.dp)) {
+                    Text("🤖 Simulating logic and querying Gemini cloud servers...", color = Color(0xFF00E5FF), fontSize = 11.sp)
+                }
+            }
+        }
+
+        // Input send box
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = promptInput,
+                onValueChange = { promptInput = it },
+                placeholder = { Text("Ask gaming advice, VCT meta stats, etc...") },
+                modifier = Modifier.weight(1f).testTag("ai_prompt_input"),
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF00E5FF))
+            )
+            Button(
+                onClick = {
+                    if (promptInput.isNotBlank()) {
+                        val prompt = promptInput
+                        responsesLog = responsesLog + Pair("YOU", prompt)
+                        promptInput = ""
+                        isLoadingResponse = true
+
+                        scope.launch {
+                            val res = AuraGeminiService.askGeminiCopilot(prompt)
+                            responsesLog = responsesLog + Pair("AI COPILOT", res)
+                            isLoadingResponse = false
+                        }
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF)),
+                modifier = Modifier.size(54.dp).testTag("ai_send_btn")
+            ) {
+                Icon(Icons.Default.Send, contentDescription = "send prompt", tint = Color.Black)
+            }
+        }
+    }
+}
+
+// ==========================================
+//               ADMIN TAB SCREEN
+// ==========================================
+
+@Composable
+fun AdminDashboardTabScreen(
+    usersList: List<UserProfile>,
+    products: List<Product>,
+    games: List<GameItem>,
+    news: List<NewsItem>,
+    posts: List<Post>,
+    banners: List<HeroBanner>,
+    creators: List<Creator>,
+    notifications: List<AppNotification>,
+    onSwitchToAdmin: () -> Unit
+) {
+    var adminLogText by remember { mutableStateOf("Admin Command deck ready. Banners & database synched.") }
+
+    // Admin forms state
+    var inputPrdName by remember { mutableStateOf("") }
+    var inputPrdPrice by remember { mutableStateOf("") }
+    var inputPrdCategory by remember { mutableStateOf("Gaming Keyboards") }
+    var inputPrdDesc by remember { mutableStateOf("") }
+
+    var inputNewsTitle by remember { mutableStateOf("") }
+    var inputNewsDesc by remember { mutableStateOf("") }
+
+    var inputGameName by remember { mutableStateOf("") }
+    var inputGameThumb by remember { mutableStateOf("https://images.unsplash.com/photo-1511512578047-dfb367046420?q=80&w=200") }
+
+    val user = AuraRepository.currentUserState.value
+    if (user.role != UserRole.ADMIN) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp)
+                .testTag("admin_lock_view"),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Text("🔒 ACCESS RESTRICTED", color = Color(0xFFFF007A), fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    "This control deck is restricted exclusively to Admins. Your active role is ${user.role}.",
+                    color = Color.LightGray,
+                    textAlign = TextAlign.Center,
+                    fontSize = 13.sp
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(
+                    onClick = onSwitchToAdmin,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBD00FF)),
+                    modifier = Modifier.testTag("unlock_admin_btn")
+                ) {
+                    Text("Trigger Mock Administrator Credentials Profile")
+                }
+            }
+        }
+        return
+    }
+
+    // Full dashboard details
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .testTag("admin_view"),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        item {
+            Text("🎛️ ACT ADMINISTRATIVE REALTIME DECK", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            Text("Logged in as Head Admin: auracommunityact@gmail.com", color = Color(0xFF00E5FF), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+        }
+
+        // Live stats counters
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                listOf(
+                    Pair("Total Members", "${usersList.size}"),
+                    Pair("Online Matches", "2 Active"),
+                    Pair("Products Catalog", "${products.size}"),
+                    Pair("Arcades", "${games.size}")
+                ).forEach { stats ->
+                    Card(
+                        modifier = Modifier.weight(1f),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF121620))
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(stats.first, color = Color.LightGray, fontSize = 9.sp, maxLines = 1)
+                            Text(stats.second, color = Color(0xFF00E5FF), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Command logger terminal
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF07090F)),
+                border = BorderStroke(1.dp, Color(0xFF2B3245))
+            ) {
+                Column(modifier = Modifier.padding(10.dp).fillMaxWidth()) {
+                    Text("ACT CONTROLLER LOGGER SYSTEM", color = Color(0xFFFF007A), fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(adminLogText, color = Color(0xFF00FF85), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                }
+            }
+        }
+
+        // User accounts management panel
+        item {
+            Text("👮 MEMBER USERS LIST", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF121620))) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    usersList.forEach { target ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(target.displayName, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text(target.email, color = Color.LightGray, fontSize = 10.sp)
+                                Text("Lvl: ${target.level} | Banned: ${target.isBanned}", color = Color.Gray, fontSize = 9.sp)
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Button(
+                                    onClick = {
+                                        AuraRepository.banUserToggle(target.email)
+                                        adminLogText = "Swapped Ban status for ${target.email}"
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = if (target.isBanned) Color(0xFF00FF85) else Color(0xFFFF007A)),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(28.dp)
+                                ) {
+                                    Text(if (target.isBanned) "Revoke Ban" else "Ban Account", fontSize = 9.sp, color = Color.Black)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Add Product Form Creator
+        item {
+            Text("➕ REGISTER PRODUCT TO CATALOGUE", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF121620)),
+                border = BorderStroke(1.dp, Color(0xFF2B3245))
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = inputPrdName,
+                        onValueChange = { inputPrdName = it },
+                        label = { Text("Product name text") },
+                        modifier = Modifier.fillMaxWidth().testTag("admin_prd_name_input"),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF00E5FF))
+                    )
+                    OutlinedTextField(
+                        value = inputPrdPrice,
+                        onValueChange = { inputPrdPrice = it },
+                        label = { Text("Price tag double") },
+                        modifier = Modifier.fillMaxWidth().testTag("admin_prd_price_input"),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF00E5FF))
+                    )
+                    OutlinedTextField(
+                        value = inputPrdDesc,
+                        onValueChange = { inputPrdDesc = it },
+                        label = { Text("Product specifications description") },
+                        modifier = Modifier.fillMaxWidth().testTag("admin_prd_desc_input"),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF00E5FF))
+                    )
+                    Button(
+                        onClick = {
+                            if (inputPrdName.isNotBlank() && inputPrdPrice.isNotBlank()) {
+                                val priceVal = inputPrdPrice.toDoubleOrNull() ?: 99.99
+                                AuraRepository.addProduct(
+                                    Product(
+                                        id = "p_a_" + System.currentTimeMillis(),
+                                        name = inputPrdName,
+                                        description = inputPrdDesc,
+                                        price = priceVal,
+                                        rating = 4.8f,
+                                        image = "https://images.unsplash.com/photo-1587829741301-dc798b83add3?q=80&w=400",
+                                        category = inputPrdCategory
+                                    )
+                                )
+                                adminLogText = "Successfully synchronized product catalogue: $inputPrdName"
+                                inputPrdName = ""
+                                inputPrdPrice = ""
+                                inputPrdDesc = ""
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF)),
+                        modifier = Modifier.fillMaxWidth().testTag("add_product_admin_submit")
+                    ) {
+                        Text("Save & Publish Product", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        // Add Game Form Creator
+        item {
+            Text("🎮 REGISTER GAME DYNAMICALLY WITHOUT CODE", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF121620))) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = inputGameName,
+                        onValueChange = { inputGameName = it },
+                        label = { Text("Game Name") },
+                        modifier = Modifier.fillMaxWidth().testTag("admin_game_name_input")
+                    )
+                    OutlinedTextField(
+                        value = inputGameThumb,
+                        onValueChange = { inputGameThumb = it },
+                        label = { Text("Game Thumbnail Image URL") },
+                        modifier = Modifier.fillMaxWidth().testTag("admin_game_image_input")
+                    )
+                    Button(
+                        onClick = {
+                            if (inputGameName.isNotBlank()) {
+                                AuraRepository.addGame(
+                                    GameItem(
+                                        id = "g_admin_" + System.currentTimeMillis(),
+                                        name = inputGameName,
+                                        thumbnail = inputGameThumb,
+                                        category = "Admin Added",
+                                        isFeatured = true
+                                    )
+                                )
+                                adminLogText = "Successfully mapped game system config: $inputGameName"
+                                inputGameName = ""
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF)),
+                        modifier = Modifier.fillMaxWidth().testTag("add_game_submit_btn")
+                    ) {
+                        Text("Add Game Dynamically", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        // Global Alert broadcast trigger button
+        item {
+            Text("🚨 COMMS ALERTS TRANSMITTER", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF121620))) {
+                Row(
+                    modifier = Modifier.padding(14.dp).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            AuraRepository.broadcastGlobalNotification("System Scheduled Maintenance Warning", "ACT servers will update matchmaking protocols tomorrow at 04:00 UTC.")
+                            adminLogText = "Broadcasting maintenance notification globally."
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBD00FF)),
+                        modifier = Modifier.weight(1f).testTag("alert_mnt_btn")
+                    ) {
+                        Text("Maint-Alert", fontSize = 12.sp)
+                    }
+                    Button(
+                        onClick = {
+                            AuraRepository.broadcastGlobalNotification("Esports League Final Match Signups Open", "Register custom team details for the retro arcade snake battle tomorrow.")
+                            adminLogText = "Broadcasting tournaments notification globally."
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF007A)),
+                        modifier = Modifier.weight(1f).testTag("alert_tournament_btn")
+                    ) {
+                        Text("Tournaments", fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==========================================
+//               PROFILE TAB SCREEN
+// ==========================================
+
+@Composable
+fun ProfileTabScreen(
+    currentUser: UserProfile,
+    myPosts: List<Post>
+) {
+    var chatMessageInput by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    val chatMessages by AuraRepository.chatMessagesState.collectAsStateWithLifecycle()
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("profile_view"),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // Cover & avatar profiles card
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF121620)),
+                border = BorderStroke(1.dp, Color(0xFF2B3245))
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    // Cover photo
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(110.dp)
+                    ) {
+                        AsyncImage(model = currentUser.coverPhoto, contentDescription = "cover pc", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    }
+
+                    // Avatar photo floating
+                    Box(
+                        modifier = Modifier
+                            .offset(y = (-40).dp)
+                            .size(74.dp)
+                            .clip(CircleShape)
+                            .border(3.dp, Color(0xFF00E5FF), CircleShape)
+                    ) {
+                        AsyncImage(model = currentUser.profilePic, contentDescription = "profile pc", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    }
+
+                    Column(
+                        modifier = Modifier.offset(y = (-30).dp).padding(horizontal = 16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(currentUser.displayName, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                        Text("@${currentUser.username}", color = Color(0xFFBD00FF), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(currentUser.bio, color = Color.LightGray, fontSize = 12.sp, textAlign = TextAlign.Center)
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Level gage
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Aura Level: ${currentUser.level}", color = Color(0xFF00FF85), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("1,240 XP / 2,000 XP", color = Color.LightGray, fontSize = 11.sp)
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(Color(0xFF2B3245))
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(0.62f)
+                                    .height(6.dp)
+                                    .background(Color(0xFF00FF85))
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Stats rows counter elements
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF121620))
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    listOf(
+                        Pair("Followers", "${currentUser.followersCount}"),
+                        Pair("Following", "${currentUser.followingCount}"),
+                        Pair("Publications", "${currentUser.postsCount}"),
+                        Pair("Score Likes", "${currentUser.likesCount}")
+                    ).forEach { stateItem ->
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(stateItem.second, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            Text(stateItem.first, color = Color.Gray, fontSize = 10.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Live direct message simulator box in Profile!
+        item {
+            Text("💬 LIVE CHAT LOBBY CHANNEL (REAL-TIME)", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF121620)),
+                border = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.3f))
+            ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Scrolling messages container
+                    Box(modifier = Modifier.height(130.dp).fillMaxWidth().background(Color(0xFF0A0F1D)).padding(8.dp)) {
+                        LazyColumn(modifier = Modifier.fillMaxSize()) {
+                            items(chatMessages) { chat ->
+                                Text(
+                                    "[${chat.senderName}]: ${chat.messageText}",
+                                    color = if (chat.senderId == currentUser.id) Color(0xFF00E5FF) else Color.White,
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    modifier = Modifier.padding(vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Message typing row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = chatMessageInput,
+                            onValueChange = { chatMessageInput = it },
+                            placeholder = { Text("Send global lobby ping...", fontSize = 11.sp) },
+                            modifier = Modifier.weight(1f).height(48.dp).testTag("chat_input_profile_field"),
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF00E5FF))
+                        )
+                        Button(
+                            onClick = {
+                                if (chatMessageInput.isNotBlank()) {
+                                    AuraRepository.sendChatMessage(chatMessageInput)
+                                    chatMessageInput = ""
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBD00FF)),
+                            contentPadding = PaddingValues(0.dp),
+                            modifier = Modifier.size(48.dp).testTag("chat_send_profile_btn")
+                        ) {
+                            Icon(Icons.Default.Send, contentDescription = "send message", tint = Color.White, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sandbox System settings with switchers
+        item {
+            Text("⚙️ ACCESSIBLE EVALUATION SETTINGS", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF172030))) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Evaluate Permissions and Role Actions:", color = Color.LightGray, fontSize = 12.sp)
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        Button(
+                            onClick = { AuraRepository.switchUserRole(UserRole.NORMAL) },
+                            colors = ButtonDefaults.buttonColors(containerColor = if (currentUser.role == UserRole.NORMAL) Color(0xFF00E5FF) else Color(0xFF2B3245)),
+                            modifier = Modifier.testTag("switch_to_normal_btn")
+                        ) {
+                            Text("Casual", color = if (currentUser.role == UserRole.NORMAL) Color.Black else Color.White, fontSize = 10.sp)
+                        }
+                        Button(
+                            onClick = { AuraRepository.switchUserRole(UserRole.COMMUNITY_MEMBER) },
+                            colors = ButtonDefaults.buttonColors(containerColor = if (currentUser.role == UserRole.COMMUNITY_MEMBER) Color(0xFF00E5FF) else Color(0xFF2B3245)),
+                            modifier = Modifier.testTag("switch_to_member_btn")
+                        ) {
+                            Text("Member", color = if (currentUser.role == UserRole.COMMUNITY_MEMBER) Color.Black else Color.White, fontSize = 10.sp)
+                        }
+                        Button(
+                            onClick = { AuraRepository.switchUserRole(UserRole.ADMIN) },
+                            colors = ButtonDefaults.buttonColors(containerColor = if (currentUser.role == UserRole.ADMIN) Color(0xFFBD00FF) else Color(0xFF2B3245)),
+                            modifier = Modifier.testTag("switch_to_admin_btn")
+                        ) {
+                            Text("Admin", color = Color.White, fontSize = 10.sp)
+                        }
+                    }
+
+                    Divider(color = Color(0xFF2B3245), thickness = 0.5.dp)
+
+                    Button(
+                        onClick = {
+                            AuraRepository.resetToDefaults()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF007A)),
+                        modifier = Modifier.fillMaxWidth().testTag("sandbox_factory_reset_btn")
+                    ) {
+                        Text("Factory Reset Profile Sandbox Data", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}

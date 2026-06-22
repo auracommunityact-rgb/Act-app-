@@ -1,0 +1,6 @@
+{
+  "name": "Aura Community",
+  "description": "Complete Gaming Community Platform - (Aura Community / ACT). Featuring gaming news, an Amazon-style gaming store, WinZO-style mini-games, professional creators, real-time chat, and a full admin dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
