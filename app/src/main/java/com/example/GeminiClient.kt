@@ -18,11 +18,7 @@ object AuraGeminiService {
         .build()
 
     private fun getApiKey(): String {
-        return try {
-            BuildConfig.GEMINI_API_KEY
-        } catch (e: Exception) {
-            ""
-        }
+        return AuraEnvConfig.getGeminiApiKey() ?: ""
     }
 
     suspend fun askGeminiCopilot(prompt: String, contextHistory: String = ""): String = withContext(Dispatchers.IO) {

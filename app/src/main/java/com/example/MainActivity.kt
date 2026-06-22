@@ -51,6 +51,8 @@ import java.util.Calendar
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Dynamically initialize and check Firebase secure runtime environment variables
+        AuraEnvConfig.initializeFirebaseSafely(applicationContext)
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
@@ -2329,6 +2331,60 @@ fun ProfileTabScreen(
                             Text("Admin", color = Color.White, fontSize = 10.sp)
                         }
                     }
+
+                    Divider(color = Color(0xFF2B3245), thickness = 0.5.dp)
+
+                    Text("🔐 RUNTIME ENVIRONMENT SECRETS", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        val geminiStatus = AuraEnvConfig.getGeminiApiKey() != null
+                        val firebaseKeyStatus = AuraEnvConfig.getFirebaseApiKey() != null
+                        val firebaseProjStatus = AuraEnvConfig.getFirebaseProjectId() != null
+
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("GEMINI AI KEY:", color = Color.Gray, fontSize = 9.sp)
+                            Text(
+                                text = if (geminiStatus) "Configured (${AuraEnvConfig.maskSecret(BuildConfig.GEMINI_API_KEY)})" else "Not Configured (Placeholder)",
+                                color = if (geminiStatus) Color(0xFF00FF85) else Color(0xFFFF007A),
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("FIREBASE PROJ ID:", color = Color.Gray, fontSize = 9.sp)
+                            Text(
+                                text = AuraEnvConfig.maskSecret(try { BuildConfig.FIREBASE_PROJECT_ID } catch (e: Exception) { "" }),
+                                color = if (firebaseProjStatus) Color(0xFF00FF85) else Color(0xFFFF007A),
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("FIREBASE KEY:", color = Color.Gray, fontSize = 9.sp)
+                            Text(
+                                text = AuraEnvConfig.maskSecret(try { BuildConfig.FIREBASE_API_KEY } catch (e: Exception) { "" }),
+                                color = if (firebaseKeyStatus) Color(0xFF00FF85) else Color(0xFFFF007A),
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "⚠️ Security Warning: I have included your API keys in the generated APK file for this prototype. Please be aware that Android APKs can be easily decompiled, and these keys can be extracted by anyone who has access to the file. Do not share this APK file publicly or with unauthorized individuals to prevent potential misuse.",
+                        color = Color(0xFFFFC107),
+                        fontSize = 9.sp,
+                        lineHeight = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
 
                     Divider(color = Color(0xFF2B3245), thickness = 0.5.dp)
 
